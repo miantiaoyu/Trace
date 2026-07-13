@@ -2,13 +2,7 @@
 
 ## 项目简介
 
-Trace 第一版是一个船司 API 探测工具。它从公司只读库读取船司和柜号，然后调用试点船司的 Track & Trace API，并在控制台打印原始返回。
-
-当前试点船司：
-
-- Maersk
-- CMA CGM
-- MSC
+Trace 是一个只读的船司 Track & Trace 查询工具。它从公司只读库读取最近订单中的船司和柜号，根据船司进入不同的官网/API 路线，并在控制台输出统一 JSON 报告。
 
 ## 安装/准备
 
@@ -28,33 +22,37 @@ prod-db.yml
 
 ## 启动/使用
 
-从只读库取最近的 Maersk 柜号并调用 API：
+查询最近 7 天订单，最多处理 20 个去重柜号：
 
 ```bash
-python -m trace_api_probe --carrier MAERSK
+python -m trace_api_probe
 ```
 
-从只读库取最近的 CMA CGM 柜号并调用 API：
+只查询某一家船司：
 
 ```bash
-python -m trace_api_probe --carrier CMA_CGM
+python -m trace_api_probe --carrier YML --days 7 --limit 1
 ```
 
-从只读库取最近的 MSC 柜号并调用 API：
+使用无界面浏览器运行 MSC、万海等网页路线：
 
 ```bash
-python -m trace_api_probe --carrier MSC
+python -m trace_api_probe --carrier MSC --headless --limit 1
 ```
 
-手动指定柜号，不读取数据库样本：
+手动指定柜号进行单条联调，不读取数据库：
 
 ```bash
-python -m trace_api_probe --carrier MAERSK --container MSKU1234567
+python -m trace_api_probe --carrier YML --container YMMU7349033
 ```
+
+`--limit 0` 表示不限制最近时间窗口内的记录数。入口会按 `update_time DESC, id DESC` 读取 `trobs.po_cabinet_combination`，并按柜号去重。程序不会写库，也不会保存返回文件。
+
+输出报告包含 `query`、`summary` 和 `results`。每条 `results` 记录包含数据库样本信息、归一化船司、路线、状态和 `raw` 原始返回；网页受限或凭证缺失时会在对应记录中返回错误，不会让其他记录消失。
 
 ## API 凭证
 
-未配置 API 凭证时，程序会在调用 API 前停止并提示缺少的环境变量。
+当前 CMA CGM 仍走官方 API 凭证路线，未配置时对应记录会返回缺少凭证的错误。其他已验证船司优先走官网公开页面或官网自身请求，不需要额外 API 凭证。
 
 支持的环境变量：
 
@@ -75,19 +73,15 @@ MSC_TRACK_TRACE_URL
 
 ### 会写公司数据库吗？
 
-不会。第一版只读取数据库，不写入任何表。
+不会。程序只读取 `trobs.po_cabinet_combination`，不执行写入语句。
 
 ### 会爬船司网页吗？
 
-不会。没有 API 凭证时程序会直接停止。
+部分路线会通过标准 HTTP 或 Playwright 读取船司官网公开查询结果；不绕验证码、不导出或复用外部 Cookie、不伪造返回。
 
-### 会保存 API 返回文件吗？
+### 会保存返回文件吗？
 
-不会。第一版只在控制台打印原始 JSON。
-
-### 没有 API 凭证能看到真实返回吗？
-
-不能。没有凭证时只能验证读库、取柜号和缺凭证提示。
+不会，只在控制台输出 JSON 报告。
 
 ## 爬虫实验
 

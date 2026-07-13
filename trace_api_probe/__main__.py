@@ -7,51 +7,116 @@ from pathlib import Path
 
 from trace_api_probe.carriers import Carrier, parse_carrier
 from trace_api_probe.config import read_db_config
-from trace_api_probe.db import ShipmentSample, fetch_latest_container
-from trace_api_probe.providers import MissingCredentialError, provider_for
+from trace_api_probe.db import ShipmentSample, fetch_recent_shipments
+from trace_api_probe.tracking import TrackingOptions, query_samples
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="从只读库取柜号并探测船司 Track & Trace API 原始返回")
-    parser.add_argument("--carrier", required=True, help="试点船司: MAERSK / CMA_CGM / MSC，也可传数据库里的船司写法")
-    parser.add_argument("--container", help="手动指定柜号；传入后不会从数据库取样本")
+    parser = argparse.ArgumentParser(description="从只读库读取最近订单并按船司查询柜号轨迹")
+    parser.add_argument("--carrier", help="只查询指定船司；不传则查询最近订单中的全部船司")
+    parser.add_argument("--container", help="手动指定柜号；必须同时传 --carrier")
     parser.add_argument("--db-config", default="prod-db.yml", help="只读数据库配置文件路径，默认 prod-db.yml")
+    parser.add_argument("--days", type=_positive_int, default=7, help="查询最近多少天，默认 7")
+    parser.add_argument(
+        "--limit",
+        type=_nonnegative_int,
+        default=20,
+        help="最多查询多少个去重柜号，默认 20；传 0 表示不限制",
+    )
+    parser.add_argument("--headless", action="store_true", help="网页路线使用无界面浏览器")
+    parser.add_argument(
+        "--browser-channel",
+        choices=("chromium", "msedge"),
+        default="chromium",
+        help="网页路线使用的浏览器通道，默认 chromium",
+    )
     args = parser.parse_args(argv)
 
     try:
-        carrier = parse_carrier(args.carrier)
-        sample = _resolve_sample(carrier, args.container, Path(args.db_config))
-        print(_sample_message(carrier, sample), file=sys.stderr)
-
-        raw = provider_for(carrier).fetch_raw(sample.container_no)
-        print(json.dumps(raw, ensure_ascii=False, indent=2))
-        return 0
-    except MissingCredentialError as exc:
-        print(f"无法调用 API：{exc}", file=sys.stderr)
-        print("已停止：不会爬网页、不会伪造返回、不会写数据库。", file=sys.stderr)
-        return 2
+        carrier = parse_carrier(args.carrier) if args.carrier else None
+        samples = _resolve_samples(
+            carrier=carrier,
+            container_no=args.container,
+            config_path=Path(args.db_config),
+            days=args.days,
+            limit=args.limit,
+        )
+        report = _build_report(
+            samples=samples,
+            days=args.days,
+            limit=args.limit,
+            carrier=carrier,
+            options=TrackingOptions(headless=args.headless, browser_channel=args.browser_channel),
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+        return 0 if report["summary"]["failed"] == 0 else 1
     except Exception as exc:
         print(f"执行失败：{exc}", file=sys.stderr)
         return 1
 
 
-def _resolve_sample(carrier: Carrier, container_no: str | None, config_path: Path) -> ShipmentSample:
+def _resolve_samples(
+    *,
+    carrier: Carrier | None,
+    container_no: str | None,
+    config_path: Path,
+    days: int,
+    limit: int,
+) -> list[ShipmentSample]:
+    if container_no and not carrier:
+        raise ValueError("手动指定柜号时必须同时传 --carrier")
     if container_no:
-        return ShipmentSample(
+        return [
+            ShipmentSample(
             id=0,
             shipping_company=carrier.value,
             container_no=container_no,
             update_time=None,
             create_time=None,
-        )
+            )
+        ]
 
     db_config = read_db_config(config_path)
-    return fetch_latest_container(db_config, carrier)
+    return fetch_recent_shipments(db_config, days=days, carrier=carrier, limit=limit)
 
 
-def _sample_message(carrier: Carrier, sample: ShipmentSample) -> str:
-    source = "命令行传入" if sample.id == 0 else f"只读库样本 id={sample.id}, shipping_company={sample.shipping_company}"
-    return f"船司={carrier.value}, 柜号={sample.container_no}, 来源={source}"
+def _build_report(
+    *,
+    samples: list[ShipmentSample],
+    days: int,
+    limit: int,
+    carrier: Carrier | None,
+    options: TrackingOptions,
+) -> dict[str, object]:
+    results = query_samples(samples, options=options)
+    success = sum(result["status"] == "success" for result in results)
+    failed = len(results) - success
+    return {
+        "query": {
+            "source": "trobs.po_cabinet_combination",
+            "read_only": True,
+            "days": days,
+            "limit": limit,
+            "carrier": carrier.value if carrier else None,
+            "count": len(samples),
+        },
+        "summary": {"total": len(results), "success": success, "failed": failed},
+        "results": results,
+    }
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("必须是大于 0 的整数")
+    return parsed
+
+
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("必须是大于等于 0 的整数")
+    return parsed
 
 
 if __name__ == "__main__":

@@ -1,0 +1,56 @@
+import unittest
+
+from trace_api_probe.carriers import Carrier
+from trace_api_probe.db import ShipmentSample
+from trace_api_probe.tracking import CarrierRoute, TrackingOptions, TrackingRouter, query_samples
+
+
+def sample(company: str = "YML阳明", container: str = "YMMU7349033") -> ShipmentSample:
+    return ShipmentSample(7, company, container, "2026-07-13 10:00:00", "2026-07-12 10:00:00")
+
+
+class TrackingRouterTests(unittest.TestCase):
+    def test_routes_sample_and_keeps_raw_payload(self) -> None:
+        routes = {
+            Carrier.YANG_MING: CarrierRoute("fake", "测试路线", lambda container, options: {"events": [container]})
+        }
+
+        result = TrackingRouter(routes).query(sample(), TrackingOptions())
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["carrier"], "YANG_MING")
+        self.assertEqual(result["raw"], {"events": ["YMMU7349033"]})
+
+    def test_keeps_query_failure_and_does_not_raise(self) -> None:
+        routes = {
+            Carrier.YANG_MING: CarrierRoute("fake", "测试路线", lambda container, options: (_ for _ in ()).throw(RuntimeError("站点超时")))
+        }
+
+        result = TrackingRouter(routes).query(sample(), TrackingOptions())
+
+        self.assertEqual(result["status"], "query_failed")
+        self.assertEqual(result["error"], {"type": "RuntimeError", "message": "站点超时"})
+
+    def test_identifies_known_but_unavailable_carrier(self) -> None:
+        result = TrackingRouter().query(sample("OOCL 东方海外", "OOLU1234567"))
+
+        self.assertEqual(result["carrier"], "OOCL")
+        self.assertEqual(result["status"], "route_unavailable")
+
+    def test_unknown_carrier_is_reported_as_data(self) -> None:
+        result = TrackingRouter().query(sample("未知船司", "ABCU1234567"))
+
+        self.assertEqual(result["status"], "unsupported_carrier")
+        self.assertIsNone(result["carrier"])
+
+    def test_batch_preserves_order(self) -> None:
+        routes = {
+            Carrier.YANG_MING: CarrierRoute("fake", "测试路线", lambda container, options: {"container": container})
+        }
+        results = query_samples([sample(container="YMMU0000001"), sample(container="YMMU0000002")], router=TrackingRouter(routes))
+
+        self.assertEqual([result["container"] for result in results], ["YMMU0000001", "YMMU0000002"])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,70 @@
+import sys
+import types
+import unittest
+from unittest.mock import patch
+
+from trace_api_probe.carriers import Carrier
+from trace_api_probe.config import DbConfig
+from trace_api_probe.db import fetch_recent_shipments
+
+
+class FakeCursor:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.query = ""
+        self.params: list[object] = []
+
+    def __enter__(self) -> "FakeCursor":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def execute(self, query: str, params: list[object]) -> None:
+        self.query = query
+        self.params = params
+
+    def fetchall(self) -> list[dict[str, object]]:
+        return self.rows
+
+
+class FakeConnection:
+    def __init__(self, cursor: FakeCursor) -> None:
+        self.fake_cursor = cursor
+
+    def cursor(self) -> FakeCursor:
+        return self.fake_cursor
+
+    def close(self) -> None:
+        return None
+
+
+class DbTests(unittest.TestCase):
+    def test_fetches_recent_rows_and_deduplicates_container_numbers(self) -> None:
+        cursor = FakeCursor(
+            [
+                {"id": 2, "shipping_company": "YML阳明", "cabinet_no": "YMMU0000002", "update_time": "2026-07-13", "create_time": None},
+                {"id": 1, "shipping_company": "YML阳明", "cabinet_no": "YMMU0000002", "update_time": "2026-07-12", "create_time": None},
+            ]
+        )
+        fake_module = types.SimpleNamespace(
+            cursors=types.SimpleNamespace(DictCursor=object),
+            connect=lambda **kwargs: FakeConnection(cursor),
+        )
+
+        with patch.dict(sys.modules, {"pymysql": fake_module}):
+            result = fetch_recent_shipments(
+                DbConfig("db.example", 3306, "reader", "secret"),
+                days=7,
+                carrier=Carrier.YANG_MING,
+                limit=20,
+            )
+
+        self.assertEqual([item.container_no for item in result], ["YMMU0000002"])
+        self.assertIn("INTERVAL 7 DAY", cursor.query)
+        self.assertIn("ORDER BY update_time DESC, id DESC", cursor.query)
+        self.assertEqual(cursor.params, ["YML", "YML阳明", "YML 阳明", "阳明", "YANGMING", "YANG MING"])
+
+
+if __name__ == "__main__":
+    unittest.main()

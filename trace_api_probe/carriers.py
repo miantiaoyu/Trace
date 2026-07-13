@@ -7,6 +7,20 @@ class Carrier(str, Enum):
     MAERSK = "MAERSK"
     CMA_CGM = "CMA_CGM"
     MSC = "MSC"
+    YANG_MING = "YANG_MING"
+    SM_LINE = "SM_LINE"
+    EVERGREEN = "EVERGREEN"
+    COSCO = "COSCO"
+    ONE = "ONE"
+    WAN_HAI = "WAN_HAI"
+    APL = "APL"
+    HMM = "HMM"
+    OOCL = "OOCL"
+    ZIM = "ZIM"
+    TS_LINES = "TS_LINES"
+    HAPAG_LLOYD = "HAPAG_LLOYD"
+    KMTC = "KMTC"
+    SEA_LEAD = "SEA_LEAD"
 
 
 ALIASES: dict[Carrier, tuple[str, ...]] = {
@@ -33,6 +47,20 @@ ALIASES: dict[Carrier, tuple[str, ...]] = {
         "MSC 地中海",
         "地中海",
     ),
+    Carrier.YANG_MING: ("YML", "YML阳明", "YML 阳明", "阳明", "YANGMING", "YANG MING"),
+    Carrier.SM_LINE: ("SML", "SML森罗商船", "SML 森罗商船", "SM LINE", "SMLine", "森罗商船"),
+    Carrier.EVERGREEN: ("EMC", "EMC长荣", "EMC 长荣", "EVERGREEN", "长荣"),
+    Carrier.COSCO: ("COSCO", "COSCO中远", "COSCO 中远", "中远", "中远海运"),
+    Carrier.ONE: ("ONE", "ONE海洋网联", "ONE 海洋网联", "海洋网联"),
+    Carrier.WAN_HAI: ("WANHAI", "WAN HAI", "WANHAI万海", "WAN HAI 万海", "万海"),
+    Carrier.APL: ("APL", "APL美总", "APL 美总", "美总"),
+    Carrier.HMM: ("HMM", "HMM韩新", "HMM 韩新", "韩新", "HMM BCO", "HMM NVO"),
+    Carrier.OOCL: ("OOCL", "OOCL东方海外", "OOCL 东方海外", "东方海外"),
+    Carrier.ZIM: ("ZIM", "ZIM以星", "ZIM 以星", "以星"),
+    Carrier.TS_LINES: ("TS", "TS LINES", "TS Lines", "TS Lines正达", "正达"),
+    Carrier.HAPAG_LLOYD: ("HPL", "HPL赫伯罗特", "HPL 赫伯罗特", "HAPAG-LLOYD", "HAPAG LLOYD", "赫伯罗特"),
+    Carrier.KMTC: ("KMTC", "KMTC高丽", "KMTC 高丽", "高丽"),
+    Carrier.SEA_LEAD: ("SLS", "SLS海领", "SLS 海领", "SEALEAD", "SEA LEAD", "海领"),
 }
 
 

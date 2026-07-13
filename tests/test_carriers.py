@@ -15,7 +15,7 @@ class CarrierTests(unittest.TestCase):
 
     def test_parse_carrier_rejects_unknown_value(self) -> None:
         with self.assertRaisesRegex(ValueError, "不支持的船司"):
-            parse_carrier("COSCO中远")
+            parse_carrier("不存在的船司")
 
 
 if __name__ == "__main__":
