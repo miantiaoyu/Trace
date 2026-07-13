@@ -65,6 +65,29 @@ class DbTests(unittest.TestCase):
         self.assertIn("ORDER BY update_time DESC, id DESC", cursor.query)
         self.assertEqual(cursor.params, ["YML", "YML阳明", "YML 阳明", "阳明", "YANGMING", "YANG MING"])
 
+    def test_hmm_query_has_prefix_fallback_for_mojibake_company_name(self) -> None:
+        cursor = FakeCursor(
+            [
+                {"id": 3, "shipping_company": "HMM ş«ĐÂ BCO", "cabinet_no": "HMMU4706485", "update_time": "2026-07-13", "create_time": None},
+            ]
+        )
+        fake_module = types.SimpleNamespace(
+            cursors=types.SimpleNamespace(DictCursor=object),
+            connect=lambda **kwargs: FakeConnection(cursor),
+        )
+
+        with patch.dict(sys.modules, {"pymysql": fake_module}):
+            result = fetch_recent_shipments(
+                DbConfig("db.example", 3306, "reader", "secret"),
+                days=7,
+                carrier=Carrier.HMM,
+                limit=1,
+            )
+
+        self.assertEqual([item.container_no for item in result], ["HMMU4706485"])
+        self.assertIn("UPPER(TRIM(shipping_company)) LIKE %s", cursor.query)
+        self.assertIn("HMM%", cursor.params)
+
 
 if __name__ == "__main__":
     unittest.main()

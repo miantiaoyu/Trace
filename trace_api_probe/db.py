@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable
 
-from trace_api_probe.carriers import Carrier, sql_aliases
+from trace_api_probe.carriers import Carrier, sql_aliases, sql_prefixes
 from trace_api_probe.config import DbConfig
 
 
@@ -44,10 +44,18 @@ def fetch_recent_shipments(
     params: list[object] = []
     carrier_clause = ""
     if carrier is not None:
+        conditions: list[str] = []
         aliases = sql_aliases(carrier)
-        placeholders = ", ".join(["%s"] * len(aliases))
-        carrier_clause = f"AND shipping_company IN ({placeholders})"
-        params.extend(aliases)
+        if aliases:
+            placeholders = ", ".join(["%s"] * len(aliases))
+            conditions.append(f"shipping_company IN ({placeholders})")
+            params.extend(aliases)
+
+        for prefix in sql_prefixes(carrier):
+            conditions.append("UPPER(TRIM(shipping_company)) LIKE %s")
+            params.append(f"{prefix.upper()}%")
+
+        carrier_clause = f"AND ({' OR '.join(conditions)})"
 
     limit_clause = f"LIMIT {limit}" if limit else ""
     query = f"""

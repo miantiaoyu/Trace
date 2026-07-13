@@ -64,11 +64,21 @@ ALIASES: dict[Carrier, tuple[str, ...]] = {
 }
 
 
+SQL_PREFIXES: dict[Carrier, tuple[str, ...]] = {
+    # 只读库中 HMM 的中文说明存在历史字符集乱码，例如 "HMM ş«ĐÂ BCO"。
+    # HMM 前缀本身稳定，使用前缀作为数据库筛选的兼容条件。
+    Carrier.HMM: ("HMM",),
+}
+
+
 def normalize_carrier(value: str | None) -> Carrier | None:
     if value is None:
         return None
 
     compact = _compact(value)
+    if compact.startswith("HMM"):
+        return Carrier.HMM
+
     for carrier, aliases in ALIASES.items():
         if compact == _compact(carrier.value):
             return carrier
@@ -80,6 +90,10 @@ def normalize_carrier(value: str | None) -> Carrier | None:
 
 def sql_aliases(carrier: Carrier) -> tuple[str, ...]:
     return ALIASES[carrier]
+
+
+def sql_prefixes(carrier: Carrier) -> tuple[str, ...]:
+    return SQL_PREFIXES.get(carrier, ())
 
 
 def parse_carrier(value: str) -> Carrier:

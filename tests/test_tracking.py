@@ -51,6 +51,16 @@ class TrackingRouterTests(unittest.TestCase):
 
         self.assertEqual([result["container"] for result in results], ["YMMU0000001", "YMMU0000002"])
 
+    def test_routes_hmm_mojibake_company_name(self) -> None:
+        routes = {
+            Carrier.HMM: CarrierRoute("fake_hmm", "测试 HMM 路线", lambda container, options: {"container": container})
+        }
+
+        result = TrackingRouter(routes).query(sample("HMM ş«ĐÂ BCO", "HMMU4706485"))
+
+        self.assertEqual(result["carrier"], "HMM")
+        self.assertEqual(result["status"], "success")
+
 
 if __name__ == "__main__":
     unittest.main()

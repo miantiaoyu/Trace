@@ -85,6 +85,16 @@ def _wan_hai(container: str, options: TrackingOptions) -> object:
     )
 
 
+def _hmm(container: str, options: TrackingOptions) -> object:
+    from crawler_lab.hmm_probe import fetch_tracking
+
+    return fetch_tracking(
+        container,
+        headless=options.headless,
+        browser_channel=options.browser_channel,
+    )
+
+
 def _official_api(carrier: Carrier, container: str, options: TrackingOptions) -> object:
     from trace_api_probe.providers import provider_for
 
@@ -104,9 +114,9 @@ ROUTES: Mapping[Carrier, CarrierRoute] = {
     Carrier.MAERSK: CarrierRoute("maersk_browser_json", "马士基官网页面 JSON", _maersk),
     Carrier.MSC: CarrierRoute("msc_browser_json", "MSC 官网页面 JSON", _msc),
     Carrier.WAN_HAI: CarrierRoute("wan_hai_form_html", "万海官网会话表单 HTML", _wan_hai),
+    Carrier.HMM: CarrierRoute("hmm_browser_html", "HMM 官网有界浏览器 HTML", _hmm),
     Carrier.CMA_CGM: CarrierRoute("cma_cgm_official_api", "CMA CGM 官方 API（需要凭证）", _cma_cgm),
     Carrier.APL: CarrierRoute("apl_unavailable", "APL 当前没有稳定的直接查询路线", None),
-    Carrier.HMM: CarrierRoute("hmm_unavailable", "HMM 当前网络条件下尚未形成稳定路线", None),
     Carrier.OOCL: CarrierRoute("oocl_unavailable", "OOCL 当前受 Cloudflare 人机验证限制", None),
     Carrier.ZIM: CarrierRoute("zim_unavailable", "ZIM 当前受 Cloudflare 访问限制", None),
     Carrier.TS_LINES: CarrierRoute("ts_lines_unavailable", "TS Lines 查询需要人工验证码", None),

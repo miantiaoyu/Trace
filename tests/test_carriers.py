@@ -13,6 +13,9 @@ class CarrierTests(unittest.TestCase):
         self.assertEqual(normalize_carrier("CMA 达飞"), Carrier.CMA_CGM)
         self.assertEqual(normalize_carrier("MSC 地中海"), Carrier.MSC)
 
+    def test_normalize_hmm_prefix_with_mojibake_suffix(self) -> None:
+        self.assertEqual(normalize_carrier("HMM ş«ĐÂ BCO"), Carrier.HMM)
+
     def test_parse_carrier_rejects_unknown_value(self) -> None:
         with self.assertRaisesRegex(ValueError, "不支持的船司"):
             parse_carrier("不存在的船司")
