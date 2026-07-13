@@ -196,3 +196,45 @@ POST CUP_HOM_3301GS.do f_cmd=125  -> 轨迹明细
 ```
 
 脚本只在进程内保留会话 Cookie，并把官网原始 JSON 打印到终端。
+
+## 8. 万海官网查询（已验证）
+
+万海新站 `cec/#/cargotracking` 在当前环境会先经过前置校验，不适合直接抓取。当前可用路径是：
+
+```text
+https://www.wanhai.com/views/cargoTrack/CargoTrack.xhtml?file_num=65580
+```
+
+实现方式不是硬解校验，而是：
+
+1. 用标准浏览器会话访问旧站并完成一次官网自己的会话预热
+2. 同一会话再次进入后拿到 `tracking_query.xhtml`
+3. 读取页面里的 `javax.faces.ViewState`
+4. 带着官网发下来的会话 Cookie，向 `tracking_query.xhtml` 发送标准表单 POST
+
+可直接运行：
+
+```bash
+E:\miniconda\envs\py312\python.exe -m crawler_lab.wan_hai_probe --container WHSU6376250
+```
+
+当前返回的是集装箱列表结果页，可提取字段包括：
+
+- `Ctnr No.`
+- `Ctnr Date`
+- `Status Name`
+- `Ctnr Depot Name`
+- `Voyage`
+- `Vessel Name`
+- `More detail`
+
+如果 `More detail` 中带出 Booking/B/L 编号，脚本会继续使用官网 `Book No. / BL no.` 查询模式拉取一层摘要。当前样本 `WHSU6376250` 会继续查到：
+
+```text
+BL no.      026G533793
+Oboard Date 2026/06/21
+Voyage      E016
+Vessel Name WAN HAI A03
+```
+
+`Booking Data / B/L Data` 弹窗 redirect 页当前只稳定返回 `loading...` 壳页，暂不作为程序数据源。

@@ -138,6 +138,32 @@ E:\miniconda\envs\py312\python.exe -m crawler_lab.maersk_probe --container GVTU5
 
 输出包含始发地、目的地、集装箱事件、船名航次、状态和 ETA。该命令需要 Playwright Chromium，且不会保存 Cookie 或结果文件。
 
+### MSC 官网查询
+
+MSC 可通过官网标准查询页读取页面自身返回的原始 JSON：
+
+```bash
+E:\miniconda\envs\py312\python.exe -m crawler_lab.msc_probe --container TLLU8937468
+```
+
+默认使用可见浏览器，尽量贴近人工查询流程。如果想改用系统 Edge：
+
+```bash
+E:\miniconda\envs\py312\python.exe -m crawler_lab.msc_probe --container TLLU8937468 --browser-channel msedge
+```
+
+输出为官网 `TrackingInfo` 的原始 JSON，当前已验证包含提单号、起讫港、事件、船名航次和 ETA。脚本只读取页面自身返回的数据，不导出 Cookie，不做请求头伪装，也不保存本地结果文件。
+
+### 万海官网查询
+
+万海当前可用的是官网旧站路径，不直接抓 `cec/#/cargotracking`：
+
+```bash
+E:\miniconda\envs\py312\python.exe -m crawler_lab.wan_hai_probe --container WHSU6376250
+```
+
+脚本会先用标准浏览器会话预热官网，再向 `tracking_query.xhtml` 发送标准表单 POST。当前已验证能返回结果表头和原始数据行，包含柜号、时间、当前状态、堆场/码头、航次、船名和 More detail 文本。如果 More detail 中带出 Booking/B/L 编号，脚本会继续查询一层摘要，返回装船日期、航次和船名。
+
 ## 注意事项
 
 - 不要提交 `prod-db.yml`。
