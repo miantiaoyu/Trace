@@ -89,6 +89,35 @@ MSC_TRACK_TRACE_URL
 
 不能。没有凭证时只能验证读库、取柜号和缺凭证提示。
 
+## 爬虫实验
+
+维运网页面探测：
+
+```bash
+python crawler_lab/http_probe.py
+```
+
+抽取维运网前端接口线索：
+
+```bash
+python -m crawler_lab.endpoint_probe
+```
+
+调用维运网识别/跳转链接接口：
+
+```bash
+python -m crawler_lab.weiyun_api_probe --number CMAU4616180
+python -m crawler_lab.weiyun_api_probe --number GVTU5148354 --carrier-code MSK
+```
+
+查看维运网船司来源表：
+
+```bash
+python -m crawler_lab.weiyun_carriers
+```
+
+当前维运网实验结论：它可以识别柜号格式、对部分柜号自动识别船司、返回船司来源表，并生成船司官网查询链接；它不是直接返回轨迹事件的数据源。使用优先级是自动识别优先，船司映射表兜底。
+
 ## 注意事项
 
 - 不要提交 `prod-db.yml`。
