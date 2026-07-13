@@ -118,6 +118,16 @@ python -m crawler_lab.weiyun_carriers
 
 当前维运网实验结论：它可以识别柜号格式、对部分柜号自动识别船司、返回船司来源表，并生成船司官网查询链接；它不是直接返回轨迹事件的数据源。使用优先级是自动识别优先，船司映射表兜底。
 
+### 长荣官网查询
+
+长荣支持直接按柜号查询，无需 API 凭证：
+
+```bash
+E:\miniconda\envs\py312\python.exe -m crawler_lab.evergreen_probe --container EGHU9204414
+```
+
+命令会打印官网结果表的表头和数据行。当前验证返回柜型、最新动态和地点。
+
 ## 注意事项
 
 - 不要提交 `prod-db.yml`。

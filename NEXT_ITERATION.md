@@ -2,7 +2,7 @@
 
 ## 迭代目标
 
-在保持低频、只读查询的前提下，将阳明、SM Line 的 JSON 查询和 COSCO、ONE 的 DOM 查询抽象为统一 Provider；继续验证 Maersk、MSC 的官方路径，并以本地船司映射作为微运跳转兜底。
+在保持低频、只读查询的前提下，将阳明、SM Line、Evergreen 的直接查询和 COSCO、ONE 的 DOM 查询抽象为统一 Provider；继续在不同网络条件下复查 HMM，并对需要人工验证码或临时维护的船司保留明确的降级状态。
 
 基于维运网自动识别结果、船司来源表和官网跳转链接，选择 1-2 家船司继续验证官网页面自动化或官网背后接口抓取。
 
@@ -11,7 +11,9 @@
 - 优先用维运网 `recognitionCarrierNumber` / `recognitionCarrierByBLNo` 自动识别船司。
 - 自动识别失败时，再用维运网 `getCarrierSource` 建立船司代码映射。
 - 用维运网 `getCarrierSearchLink` 为真实柜号生成船司官网查询链接。
-- 先选 Maersk 或 CMA CGM 做官网页面/接口二次探测。
+- 将 Evergreen 探针纳入统一 Provider 的输入和输出模型。
+- 在不绕过人机验证的前提下，定义 CMA CGM、OOCL、ZIM、TS Lines 的人工辅助降级结果。
+- 在不同网络条件下复查 HMM 的 HTTP/2 兼容性。
 - 判断目标船司官网是否能通过纯 HTTP 调用背后 JSON 接口。
 - 如果纯 HTTP 不可行，再尝试 Playwright 网页自动化。
 
@@ -36,8 +38,8 @@
 1. 运行 `python -m crawler_lab.weiyun_api_probe --number CMAU4616180`，验证自动识别优先路径。
 2. 自动识别失败时，运行 `python -m crawler_lab.weiyun_carriers`，确认维运网船司代码。
 3. 使用 `--carrier-code` 为真实柜号生成官网链接。
-4. 打开 Maersk 或 CMA CGM 官网查询链接，观察 Network。
-5. 优先复现官网背后的 JSON 请求；如无法复现，再设计 Playwright 自动化脚本。
+4. 优先将 Evergreen 的 HTTP 页面查询和现有 JSON/DOM 查询统一为 Provider。
+5. 对 HMM 复测网络兼容性；对需人工验证码的页面只记录降级状态，不尝试绕过。
 
 ## 需要确认的问题
 
