@@ -128,6 +128,16 @@ E:\miniconda\envs\py312\python.exe -m crawler_lab.evergreen_probe --container EG
 
 命令会打印官网结果表的表头和数据行。当前验证返回柜型、最新动态和地点。
 
+### 马士基官网查询
+
+马士基无需 API 凭证，可通过官网追踪页读取该页面返回的原始 JSON：
+
+```bash
+E:\miniconda\envs\py312\python.exe -m crawler_lab.maersk_probe --container GVTU5148354
+```
+
+输出包含始发地、目的地、集装箱事件、船名航次、状态和 ETA。该命令需要 Playwright Chromium，且不会保存 Cookie 或结果文件。
+
 ## 注意事项
 
 - 不要提交 `prod-db.yml`。

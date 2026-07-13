@@ -2,7 +2,7 @@
 
 ## 迭代目标
 
-在保持低频、只读查询的前提下，将阳明、SM Line、Evergreen 的直接查询和 COSCO、ONE 的 DOM 查询抽象为统一 Provider；继续在不同网络条件下复查 HMM，并对需要人工验证码或临时维护的船司保留明确的降级状态。
+在保持低频、只读查询的前提下，将阳明、SM Line、Evergreen、Maersk 的直接查询和 COSCO、ONE 的 DOM 查询抽象为统一 Provider；继续在不同网络条件下复查 HMM，并对需要人工验证码或临时维护的船司保留明确的降级状态。
 
 基于维运网自动识别结果、船司来源表和官网跳转链接，选择 1-2 家船司继续验证官网页面自动化或官网背后接口抓取。
 
@@ -12,6 +12,7 @@
 - 自动识别失败时，再用维运网 `getCarrierSource` 建立船司代码映射。
 - 用维运网 `getCarrierSearchLink` 为真实柜号生成船司官网查询链接。
 - 将 Evergreen 探针纳入统一 Provider 的输入和输出模型。
+- 将 Maersk 的浏览器响应捕获纳入统一 Provider，并建立合理的超时和低频限制。
 - 在不绕过人机验证的前提下，定义 CMA CGM、OOCL、ZIM、TS Lines 的人工辅助降级结果。
 - 在不同网络条件下复查 HMM 的 HTTP/2 兼容性。
 - 判断目标船司官网是否能通过纯 HTTP 调用背后 JSON 接口。
