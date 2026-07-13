@@ -143,3 +143,35 @@ GET https://wywapi.weiyun001.com/api/cargoTracking/getCarrierSource
 - 当前实验不绕验证码、不破解加密参数、不绕过登录或访问控制。
 - 当前脚本只做公开页面读取和静态 JS 分析。
 - 如后续做网页自动化，优先用人工可见浏览器观察 Network，而不是高频批量请求。
+
+## 6. 阳明海运公开查询接口（已验证）
+
+维运返回的旧地址 `/en/esolution/cargo_tracking` 目前不会加载查询组件。阳明官网当前有效路径是：
+
+```text
+https://www.yangming.com/en/esolution/tracking/cargo_tracking?service=<柜号>
+```
+
+页面实际调用的公开 JSON 接口为：
+
+```text
+GET https://www.yangming.com/api/CargoTracking/GetTracking
+```
+
+请求参数：
+
+```text
+paramTrackNo=<柜号>
+paramTrackPosition=SEARCH
+paramRefNo=
+```
+
+可直接运行：
+
+```bash
+python -m crawler_lab.yang_ming_probe --container YMMU7349033
+```
+
+接口返回 `containerList[].ctStatusInfo`（站点展示事件）及
+`containerList[].dcsaStatusInfo`（DCSA 标准事件）。本实验以低频单票验证为限；
+如接口返回验证码、登录或访问限制，不绕过该限制。
