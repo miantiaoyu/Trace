@@ -175,3 +175,24 @@ python -m crawler_lab.yang_ming_probe --container YMMU7349033
 接口返回 `containerList[].ctStatusInfo`（站点展示事件）及
 `containerList[].dcsaStatusInfo`（DCSA 标准事件）。本实验以低频单票验证为限；
 如接口返回验证码、登录或访问限制，不绕过该限制。
+
+## 7. SM Line 公开查询接口（已验证）
+
+SM Line 需要先访问官网查询页建立本次查询的 `JSESSIONID`，再调用同域接口。
+不需要登录、验证码或长期保存 Cookie。
+
+```bash
+python -m crawler_lab.sm_line_probe --container SMCU1311081
+```
+
+查询顺序如下：
+
+```text
+GET  CUP_HOM_3301.do?sessLocale=zh
+POST CUP_HOM_3301GS.do f_cmd=122  -> 取得 bkgNo / copNo
+POST CUP_HOM_3301GS.do f_cmd=123  -> 当前状态
+POST CUP_HOM_3301GS.do f_cmd=124  -> 船期
+POST CUP_HOM_3301GS.do f_cmd=125  -> 轨迹明细
+```
+
+脚本只在进程内保留会话 Cookie，并把官网原始 JSON 打印到终端。
