@@ -61,7 +61,25 @@ python -m trace_api_probe --carrier YML --container YMMU7349033
 
 `--limit 0` 表示不限制最近时间窗口内的记录数。入口会按 `update_time DESC, id DESC` 读取 `trobs.po_cabinet_combination`，并按柜号去重。程序不会写库，也不会保存返回文件。
 
-输出报告包含 `query`、`summary` 和 `results`。每条 `results` 记录包含数据库样本信息、归一化船司、路线、状态和 `raw` 原始返回；网页受限或凭证缺失时会在对应记录中返回错误，不会让其他记录消失。
+批量运行会按船司路线使用默认的最小访问间隔、超时和重试策略。可按本次命令覆盖默认值：
+
+```bash
+python -m trace_api_probe --timeout-seconds 90 --max-attempts 2 --min-interval-seconds 5
+```
+
+输出报告包含 `query`、`summary` 和 `results`。每条 `results` 记录包含数据库样本信息、归一化船司、路线、执行次数、状态、`normalized` 统一摘要和 `raw` 原始返回；网页受限或凭证缺失时会在对应记录中返回错误，不会让其他记录消失。
+
+`normalized` 的固定字段包括：
+
+```text
+current: 当前时间、状态、地点、运输方式
+vessel: 船名、航次、IMO
+origin / destination / destination_eta
+events: 统一事件列表
+coverage: 当前来源实际提供了哪些字段
+```
+
+原始 `raw` 永远保留。字段不足时摘要填 `null` 或空数组，不能用推测值补齐。
 
 ## API 凭证
 

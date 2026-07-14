@@ -5,6 +5,8 @@ from typing import Callable, Mapping
 
 from trace_api_probe.carriers import Carrier, normalize_carrier
 from trace_api_probe.db import ShipmentSample
+from trace_api_probe.execution import QueryExecutor, QueryPolicy
+from trace_api_probe.normalization import normalize_tracking
 
 
 class UnsupportedTrackingError(RuntimeError):
@@ -15,9 +17,14 @@ class UnsupportedTrackingError(RuntimeError):
 class TrackingOptions:
     headless: bool = False
     browser_channel: str = "chromium"
+    timeout_seconds: float | None = None
+    max_attempts: int | None = None
+    min_interval_seconds: float | None = None
 
 
 TrackingAdapter = Callable[[str, TrackingOptions], object]
+
+DEFAULT_POLICY = QueryPolicy(min_interval_seconds=0, timeout_seconds=75, max_attempts=1)
 
 
 @dataclass(frozen=True)
@@ -25,6 +32,15 @@ class CarrierRoute:
     name: str
     description: str
     adapter: TrackingAdapter | None
+    policy: QueryPolicy = DEFAULT_POLICY
+
+
+HTTP_POLICY = QueryPolicy(min_interval_seconds=2, timeout_seconds=45, max_attempts=2)
+DOM_POLICY = QueryPolicy(min_interval_seconds=4, timeout_seconds=60, max_attempts=2)
+BROWSER_POLICY = QueryPolicy(min_interval_seconds=6, timeout_seconds=90, max_attempts=2)
+WAN_HAI_POLICY = QueryPolicy(min_interval_seconds=8, timeout_seconds=120, max_attempts=1)
+HMM_POLICY = QueryPolicy(min_interval_seconds=8, timeout_seconds=90, max_attempts=1)
+API_POLICY = QueryPolicy(min_interval_seconds=2, timeout_seconds=45, max_attempts=1)
 
 
 def _yang_ming(container: str, options: TrackingOptions) -> object:
@@ -106,16 +122,16 @@ def _cma_cgm(container: str, options: TrackingOptions) -> object:
 
 
 ROUTES: Mapping[Carrier, CarrierRoute] = {
-    Carrier.YANG_MING: CarrierRoute("yang_ming_json", "阳明官网公开 JSON", _yang_ming),
-    Carrier.SM_LINE: CarrierRoute("sm_line_json", "SM Line 官网会话 JSON", _sm_line),
-    Carrier.EVERGREEN: CarrierRoute("evergreen_html", "长荣官网表单 HTML", _evergreen),
-    Carrier.COSCO: CarrierRoute("cosco_dom", "COSCO 官网结构化 DOM", _cosco),
-    Carrier.ONE: CarrierRoute("one_dom", "ONE 官网结构化 DOM", _one),
-    Carrier.MAERSK: CarrierRoute("maersk_browser_json", "马士基官网页面 JSON", _maersk),
-    Carrier.MSC: CarrierRoute("msc_browser_json", "MSC 官网页面 JSON", _msc),
-    Carrier.WAN_HAI: CarrierRoute("wan_hai_form_html", "万海官网会话表单 HTML", _wan_hai),
-    Carrier.HMM: CarrierRoute("hmm_browser_html", "HMM 官网有界浏览器 HTML", _hmm),
-    Carrier.CMA_CGM: CarrierRoute("cma_cgm_official_api", "CMA CGM 官方 API（需要凭证）", _cma_cgm),
+    Carrier.YANG_MING: CarrierRoute("yang_ming_json", "阳明官网公开 JSON", _yang_ming, HTTP_POLICY),
+    Carrier.SM_LINE: CarrierRoute("sm_line_json", "SM Line 官网会话 JSON", _sm_line, HTTP_POLICY),
+    Carrier.EVERGREEN: CarrierRoute("evergreen_html", "长荣官网表单 HTML", _evergreen, HTTP_POLICY),
+    Carrier.COSCO: CarrierRoute("cosco_dom", "COSCO 官网结构化 DOM", _cosco, DOM_POLICY),
+    Carrier.ONE: CarrierRoute("one_dom", "ONE 官网结构化 DOM", _one, DOM_POLICY),
+    Carrier.MAERSK: CarrierRoute("maersk_browser_json", "马士基官网页面 JSON", _maersk, BROWSER_POLICY),
+    Carrier.MSC: CarrierRoute("msc_browser_json", "MSC 官网页面 JSON", _msc, BROWSER_POLICY),
+    Carrier.WAN_HAI: CarrierRoute("wan_hai_form_html", "万海官网会话表单 HTML", _wan_hai, WAN_HAI_POLICY),
+    Carrier.HMM: CarrierRoute("hmm_browser_html", "HMM 官网有界浏览器 HTML", _hmm, HMM_POLICY),
+    Carrier.CMA_CGM: CarrierRoute("cma_cgm_official_api", "CMA CGM 官方 API（需要凭证）", _cma_cgm, API_POLICY),
     Carrier.APL: CarrierRoute("apl_unavailable", "APL 当前没有稳定的直接查询路线", None),
     Carrier.OOCL: CarrierRoute("oocl_unavailable", "OOCL 当前受 Cloudflare 人机验证限制", None),
     Carrier.ZIM: CarrierRoute("zim_unavailable", "ZIM 当前受 Cloudflare 访问限制", None),
@@ -129,8 +145,13 @@ ROUTES: Mapping[Carrier, CarrierRoute] = {
 class TrackingRouter:
     """把数据库样本路由到船司适配器，并返回统一结果信封。"""
 
-    def __init__(self, routes: Mapping[Carrier, CarrierRoute] | None = None) -> None:
+    def __init__(
+        self,
+        routes: Mapping[Carrier, CarrierRoute] | None = None,
+        executor: QueryExecutor | None = None,
+    ) -> None:
         self._routes = routes or ROUTES
+        self._executor = executor or QueryExecutor(use_subprocess=routes is None)
 
     def query(self, sample: ShipmentSample, options: TrackingOptions | None = None) -> dict[str, object]:
         options = options or TrackingOptions()
@@ -157,7 +178,13 @@ class TrackingRouter:
 
         result.update(route=route.name, route_description=route.description)
         try:
-            raw = route.adapter(sample.container_no, options)
+            raw, execution = self._executor.execute(
+                carrier.value,
+                route.adapter,
+                sample.container_no,
+                options,
+                _effective_policy(route.policy, options),
+            )
         except Exception as exc:
             result.update(
                 status="query_failed",
@@ -165,7 +192,12 @@ class TrackingRouter:
             )
             return result
 
-        result.update(status="success", raw=raw)
+        result.update(
+            status="success",
+            execution=execution,
+            normalized=normalize_tracking(carrier, sample.container_no, raw),
+            raw=raw,
+        )
         return result
 
 
@@ -188,3 +220,20 @@ def _sample_metadata(sample: ShipmentSample, carrier: Carrier | None) -> dict[st
         "update_time": sample.update_time,
         "create_time": sample.create_time,
     }
+
+
+def _effective_policy(policy: QueryPolicy, options: TrackingOptions) -> QueryPolicy:
+    return QueryPolicy(
+        min_interval_seconds=(
+            options.min_interval_seconds if options.min_interval_seconds is not None else policy.min_interval_seconds
+        ),
+        timeout_seconds=options.timeout_seconds if options.timeout_seconds is not None else policy.timeout_seconds,
+        max_attempts=options.max_attempts if options.max_attempts is not None else policy.max_attempts,
+    )
+
+
+def fetch_raw_for_carrier(carrier: Carrier, container: str, options: TrackingOptions) -> object:
+    route = ROUTES.get(carrier)
+    if route is None or route.adapter is None:
+        raise UnsupportedTrackingError(f"{carrier.value} 没有可执行的查询路线")
+    return route.adapter(container, options)

@@ -30,6 +30,9 @@ def main(argv: list[str] | None = None) -> int:
         default="chromium",
         help="网页路线使用的浏览器通道，默认 chromium",
     )
+    parser.add_argument("--timeout-seconds", type=_positive_float, help="覆盖船司默认查询超时，单位秒")
+    parser.add_argument("--max-attempts", type=_positive_int, help="覆盖船司默认最大尝试次数")
+    parser.add_argument("--min-interval-seconds", type=_nonnegative_float, help="覆盖船司默认最小访问间隔，单位秒")
     args = parser.parse_args(argv)
 
     try:
@@ -46,9 +49,15 @@ def main(argv: list[str] | None = None) -> int:
             days=args.days,
             limit=args.limit,
             carrier=carrier,
-            options=TrackingOptions(headless=args.headless, browser_channel=args.browser_channel),
+            options=TrackingOptions(
+                headless=args.headless,
+                browser_channel=args.browser_channel,
+                timeout_seconds=args.timeout_seconds,
+                max_attempts=args.max_attempts,
+                min_interval_seconds=args.min_interval_seconds,
+            ),
         )
-        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+        _print_json(report)
         return 0 if report["summary"]["failed"] == 0 else 1
     except Exception as exc:
         print(f"执行失败：{exc}", file=sys.stderr)
@@ -117,6 +126,25 @@ def _nonnegative_int(value: str) -> int:
     if parsed < 0:
         raise argparse.ArgumentTypeError("必须是大于等于 0 的整数")
     return parsed
+
+
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("必须是大于 0 的数字")
+    return parsed
+
+
+def _nonnegative_float(value: str) -> float:
+    parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("必须是大于等于 0 的数字")
+    return parsed
+
+
+def _print_json(value: object) -> None:
+    payload = json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    sys.stdout.buffer.write(payload.encode("utf-8") + b"\n")
 
 
 if __name__ == "__main__":
