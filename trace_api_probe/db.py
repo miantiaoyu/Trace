@@ -94,7 +94,7 @@ def _sample_from_row(row: dict[str, object]) -> ShipmentSample:
     return ShipmentSample(
         id=int(row["id"]),
         shipping_company=str(row["shipping_company"]),
-        container_no=str(row["cabinet_no"]).strip().upper(),
+        container_no="".join(str(row["cabinet_no"]).upper().split()),
         update_time=_stringify(row.get("update_time")),
         create_time=_stringify(row.get("create_time")),
     )

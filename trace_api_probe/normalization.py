@@ -43,13 +43,59 @@ def _normalize_yang_ming(result: dict[str, object], raw: Mapping[str, Any]) -> d
     if not isinstance(containers, list) or not containers or not isinstance(containers[0], Mapping):
         return result
     item = containers[0]
-    events = _event_list(item.get("ctStatusInfo"), "moveDate", "eventDesc", "atFacility", "tsMode", "vesselVoyage")
+    source_events = item.get("dcsaStatusInfo")
+    events = _yang_ming_events(source_events)
+    if not events:
+        events = _yang_ming_events(item.get("ctStatusInfo"))
     _apply_events(result, events)
     eta = _first_value(item.get("ctStatusInfo"), "dportETA")
     if eta:
         result["destination_eta"] = eta
         _coverage(result)["eta"] = True
     return result
+
+
+def _yang_ming_events(source: object) -> list[dict[str, object]]:
+    if not isinstance(source, list):
+        return []
+    events = []
+    for item in source:
+        if not isinstance(item, Mapping):
+            continue
+        mode, vessel, voyage = _parse_transport(item.get("tsMode") or item.get("vesselVoyage"))
+        event_class = (_text(item.get("eventClassifie")) or "").upper()
+        events.append(
+            {
+                "time": _text(item.get("moveDate")),
+                "status": _text(item.get("eventDesc")),
+                "location": _text(item.get("atFacility")),
+                "mode": mode,
+                "vessel": vessel,
+                "voyage": voyage,
+                "imo": None,
+                "time_type": {"ACTUAL": "ACTUAL", "ESTIMATED": "EXPECTED"}.get(event_class),
+            }
+        )
+    return events
+
+
+def _parse_transport(value: object) -> tuple[str | None, str | None, str | None]:
+    text = _text(value)
+    if not text:
+        return None, None, None
+    parts = [part.strip() for part in re.split(r"<br\s*/?>", text, flags=re.IGNORECASE) if part.strip()]
+    if not parts:
+        return None, None, None
+    first = parts[0].upper()
+    if first in {"TRUCK", "RAIL", "BARGE"}:
+        return first.title(), None, None
+    if first == "VESSEL":
+        vessel = parts[1] if len(parts) > 1 else None
+        voyage = parts[2].strip("()") if len(parts) > 2 else None
+        return "Vessel", vessel, voyage
+    vessel = parts[0]
+    voyage = parts[1].strip("()") if len(parts) > 1 else None
+    return "Vessel", vessel, voyage
 
 
 def _normalize_hmm(result: dict[str, object], raw: Mapping[str, Any]) -> dict[str, object]:
@@ -206,26 +252,49 @@ def _normalize_one(result: dict[str, object], raw: Mapping[str, Any]) -> dict[st
     rows = raw.get("rows")
     if not isinstance(rows, list):
         return result
+    metadata = raw.get("row_metadata")
+    row_metadata = metadata if isinstance(metadata, list) else []
     events = []
-    for row in rows:
+    current_location: str | None = None
+    current_vessel: str | None = None
+    current_voyage: str | None = None
+    for row_index, row in enumerate(rows):
         values = _row_values(row)
         date_index = next((index for index, value in enumerate(values) if _is_date(value)), None)
         if date_index is None or not values[:date_index]:
             continue
         prefix = values[:date_index]
-        status = prefix[-1]
-        location = prefix[0] if len(prefix) >= 3 else None
-        vessel, voyage = _split_vessel_voyage(prefix[1] if len(prefix) == 2 else None)
+        if len(prefix) >= 3:
+            current_location = _join_location(prefix[0], prefix[1])
+            status = prefix[-1]
+            explicit_vessel = None
+        elif len(prefix) == 2:
+            explicit_vessel, explicit_voyage = _split_vessel_voyage(prefix[1])
+            if explicit_vessel or explicit_voyage:
+                status = prefix[0]
+            else:
+                current_location = prefix[0]
+                status = prefix[1]
+        else:
+            status = prefix[0]
+            explicit_vessel = None
+        if len(prefix) != 2:
+            explicit_voyage = None
+        if explicit_vessel or explicit_voyage:
+            current_vessel, current_voyage = explicit_vessel, explicit_voyage
+        is_vessel_event = "vessel" in status.lower() or bool(explicit_vessel or explicit_voyage)
+        item_metadata = row_metadata[row_index] if row_index < len(row_metadata) else None
+        time_type = _time_type(item_metadata.get("time_type")) if isinstance(item_metadata, Mapping) else None
         events.append(
             {
                 "time": _join_values(values[date_index], _at(values, date_index + 1)),
                 "status": status,
-                "location": location,
-                "mode": None,
-                "vessel": vessel,
-                "voyage": voyage,
+                "location": current_location,
+                "mode": "Vessel" if is_vessel_event and current_vessel else None,
+                "vessel": current_vessel if is_vessel_event else None,
+                "voyage": current_voyage if is_vessel_event else None,
                 "imo": None,
-                "time_type": None,
+                "time_type": time_type,
             }
         )
     _apply_events(result, events)
@@ -454,35 +523,6 @@ def _join_compact(*values: object) -> str | None:
     return merged or None
 
 
-def _event_list(
-    source: object,
-    time_key: str,
-    status_key: str,
-    location_key: str,
-    mode_key: str,
-    voyage_key: str,
-) -> list[dict[str, object]]:
-    if not isinstance(source, list):
-        return []
-    events = []
-    for item in source:
-        if not isinstance(item, Mapping):
-            continue
-        events.append(
-            {
-                "time": _text(item.get(time_key)),
-                "status": _text(item.get(status_key)),
-                "location": _text(item.get(location_key)),
-                "mode": _text(item.get(mode_key)),
-                "vessel": None,
-                "voyage": _text(item.get(voyage_key)),
-                "imo": None,
-                "time_type": None,
-            }
-        )
-    return events
-
-
 def _apply_events(result: dict[str, object], events: list[dict[str, object]]) -> None:
     result["events"] = events
     coverage = _coverage(result)
@@ -541,6 +581,8 @@ def _next_expected_event(
         return None
     current_key = _event_time_key(current) if current is not None else None
     future = [event for event in events if current_key is None or _event_time_key(event) >= current_key]
+    if current_key is not None and not future:
+        return None
     return min(future or events, key=_event_time_key)
 
 

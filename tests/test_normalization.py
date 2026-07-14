@@ -30,6 +30,39 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(result["events"][0]["time"], "2026/07/13 04:09")
         self.assertEqual(result["destination_eta"], "2026/08/01")
 
+    def test_normalizes_yang_ming_dcsa_actual_expected_and_vessel(self) -> None:
+        raw = {
+            "containerList": [
+                {
+                    "ctStatusInfo": [{"dportETA": "2026/07/18 21:00"}],
+                    "dcsaStatusInfo": [
+                        {
+                            "moveDate": "2026/07/18 21:00",
+                            "eventDesc": "Arrival by Vessel",
+                            "atFacility": "SINGAPORE",
+                            "tsMode": "VESSEL<BR />IBN AL ABBAR<BR />(344S)",
+                            "eventClassifie": "Estimated",
+                        },
+                        {
+                            "moveDate": "2026/07/10 00:20",
+                            "eventDesc": "Departure by Vessel",
+                            "atFacility": "XIAMEN",
+                            "tsMode": "VESSEL<BR />IBN AL ABBAR<BR />(344S)",
+                            "eventClassifie": "Actual",
+                        },
+                    ],
+                }
+            ]
+        }
+
+        result = normalize_tracking(Carrier.YANG_MING, "YMLU0000001", raw)
+
+        self.assertEqual(result["current"]["status"], "Departure by Vessel")
+        self.assertEqual(result["next_expected"]["status"], "Arrival by Vessel")
+        self.assertEqual(result["vessel"]["name"], "IBN AL ABBAR")
+        self.assertEqual(result["vessel"]["voyage"], "344S")
+        self.assertEqual(result["events"][0]["time_type"], "EXPECTED")
+
     def test_normalizes_hmm_shipment_progress_table(self) -> None:
         raw = {
             "tables": [
@@ -116,16 +149,28 @@ class NormalizationTests(unittest.TestCase):
     def test_normalizes_one_rows(self) -> None:
         raw = {
             "rows": [
+                ["YANTIAN, CHINA", "YANTIAN TERMINAL", "Empty Container Release", "2026-07-11", "14:44"],
                 ["Gate In to Outbound Terminal", "2026-07-12", "01:03"],
                 ["Loaded on Vessel at Port of Loading", "ZEAL LUMOS 017E", "2026-07-19", "06:00"],
-            ]
+                ["LONG BEACH, UNITED STATES", "Empty Container Returned from Customer", "2026-08-10", "20:00"],
+            ],
+            "row_metadata": [
+                {"time_type": "ACTUAL"},
+                {"time_type": "ACTUAL"},
+                {"time_type": "EXPECTED"},
+                {"time_type": "EXPECTED"},
+            ],
         }
 
         result = normalize_tracking(Carrier.ONE, "BEAU5347896", raw)
 
         self.assertEqual(result["current"]["status"], "Gate In to Outbound Terminal")
-        self.assertEqual(result["events"][1]["vessel"], "ZEAL LUMOS")
-        self.assertEqual(result["events"][1]["voyage"], "017E")
+        self.assertEqual(result["current"]["location"], "YANTIAN, CHINA - YANTIAN TERMINAL")
+        self.assertEqual(result["next_expected"]["status"], "Loaded on Vessel at Port of Loading")
+        self.assertEqual(result["events"][2]["vessel"], "ZEAL LUMOS")
+        self.assertEqual(result["events"][2]["voyage"], "017E")
+        self.assertEqual(result["events"][3]["status"], "Empty Container Returned from Customer")
+        self.assertIsNone(result["events"][3]["vessel"])
         self.assertEqual(result["vessel"]["name"], "ZEAL LUMOS")
 
     def test_normalizes_maersk_locations_and_eta(self) -> None:
@@ -185,6 +230,29 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(result["current"]["time"], "2026-07-11T10:05:00.000")
         self.assertEqual(result["next_expected"]["status"], "DEPARTURE")
         self.assertEqual(result["events"][0]["time_type"], "EXPECTED")
+
+    def test_does_not_expose_stale_expected_event_as_next(self) -> None:
+        raw = {
+            "containers": [
+                {
+                    "locations": [
+                        {
+                            "city": "TORONTO",
+                            "events": [
+                                {"event_time": "2026-04-27T08:00:00", "activity": "ESTIMATED ARRIVAL", "event_time_type": "EXPECTED"},
+                                {"event_time": "2026-05-04T12:00:00", "activity": "EMPTY RETURNED", "event_time_type": "ACTUAL"},
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+
+        result = normalize_tracking(Carrier.MAERSK, "MSKU0000002", raw)
+
+        self.assertEqual(result["current"]["status"], "EMPTY RETURNED")
+        self.assertIsNone(result["next_expected"]["status"])
+        self.assertFalse(result["coverage"]["next_expected"])
 
     def test_normalizes_sm_line_actual_and_expected_events(self) -> None:
         raw = {

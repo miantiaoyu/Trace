@@ -52,7 +52,7 @@ ALIASES: dict[Carrier, tuple[str, ...]] = {
     Carrier.EVERGREEN: ("EMC", "EMC长荣", "EMC 长荣", "EVERGREEN", "长荣"),
     Carrier.COSCO: ("COSCO", "COSCO中远", "COSCO 中远", "中远", "中远海运"),
     Carrier.ONE: ("ONE", "ONE海洋网联", "ONE 海洋网联", "海洋网联"),
-    Carrier.WAN_HAI: ("WANHAI", "WAN HAI", "WANHAI万海", "WAN HAI 万海", "万海"),
+    Carrier.WAN_HAI: ("WANHAI", "WAN HAI", "WANHAI万海", "WANHAI 万海", "WAN HAI 万海", "万海"),
     Carrier.APL: ("APL", "APL美总", "APL 美总", "美总"),
     Carrier.HMM: ("HMM", "HMM韩新", "HMM 韩新", "韩新", "HMM BCO", "HMM NVO"),
     Carrier.OOCL: (

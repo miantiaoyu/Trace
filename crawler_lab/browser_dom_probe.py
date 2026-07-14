@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -52,6 +53,19 @@ def fetch_tracking(carrier: str, container: str) -> dict[str, object]:
             page.wait_for_function("() => document.querySelectorAll('tr').length >= 2", timeout=20_000)
             body = page.locator("body").inner_text()
             rows = [split_row(text) for text in rows_locator.all_inner_texts()]
+            row_metadata = rows_locator.evaluate_all(
+                """rows => rows.map(row => {
+                    const fills = Array.from(row.querySelectorAll('svg rect[fill]'))
+                        .map(rect => (rect.getAttribute('fill') || '').toUpperCase());
+                    return {
+                        time_type: fills.includes('#00506D')
+                            ? 'ACTUAL'
+                            : fills.includes('#BD0F72')
+                                ? 'EXPECTED'
+                                : null
+                    };
+                })"""
+            )
             browser.close()
     except PlaywrightTimeoutError as exc:
         raise DomTrackingError(f"{normalized_carrier} 查询页在 20 秒内未出现结果表") from exc
@@ -62,11 +76,17 @@ def fetch_tracking(carrier: str, container: str) -> dict[str, object]:
     if len(rows) < 2:
         raise DomTrackingError(f"{normalized_carrier} 页面未返回数据行")
 
-    return {"carrier": normalized_carrier, "container": normalized_container, "url": url, "rows": rows}
+    return {
+        "carrier": normalized_carrier,
+        "container": normalized_container,
+        "url": url,
+        "rows": rows,
+        "row_metadata": row_metadata,
+    }
 
 
 def split_row(text: str) -> list[str]:
-    return [line.strip() for line in text.splitlines() if line.strip()]
+    return [value.strip() for value in re.split(r"[\r\n\t]+", text) if value.strip()]
 
 
 def validate_contract(rows: list[list[str]], expected: tuple[str, ...], carrier: str) -> None:

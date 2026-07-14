@@ -59,7 +59,7 @@ xvfb-run -a python -m trace_api_probe --carrier HMM --days 7 --limit 1
 python -m trace_api_probe --carrier YML --container YMMU7349033
 ```
 
-`--limit 0` 表示不限制最近时间窗口内的记录数。入口会按 `update_time DESC, id DESC` 读取 `trobs.po_cabinet_combination`，并按柜号去重。程序不会写库，也不会保存返回文件。
+`--limit 0` 表示不限制最近时间窗口内的记录数。入口会按 `update_time DESC, id DESC` 读取 `trobs.po_cabinet_combination`，删除柜号中的空白字符后转为大写，并按规范化柜号去重。程序不会写库，也不会保存返回文件。
 
 批量运行会按船司路线使用默认的最小访问间隔、超时和重试策略。可按本次命令覆盖默认值：
 
@@ -81,6 +81,8 @@ coverage: 当前来源实际提供了哪些字段
 ```
 
 原始 `raw` 永远保留。字段不足时摘要填 `null` 或空数组，不能用推测值补齐。
+
+各船司发船前、在途和已到目的地阶段的真实样本覆盖情况见 `TRACKING_STAGE_VALIDATION_REPORT.md`。该报告只保存脱敏状态和字段结构，不保存完整生产柜号或原始 HTML。
 
 事件时间类型：
 

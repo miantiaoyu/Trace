@@ -88,6 +88,32 @@ class DbTests(unittest.TestCase):
         self.assertIn("UPPER(TRIM(shipping_company)) LIKE %s", cursor.query)
         self.assertIn("HMM%", cursor.params)
 
+    def test_removes_internal_whitespace_from_container_number(self) -> None:
+        cursor = FakeCursor(
+            [
+                {
+                    "id": 4,
+                    "shipping_company": "EMC 长荣",
+                    "cabinet_no": " EGHU 9204414 ",
+                    "update_time": "2026-07-13",
+                    "create_time": None,
+                }
+            ]
+        )
+        fake_module = types.SimpleNamespace(
+            cursors=types.SimpleNamespace(DictCursor=object),
+            connect=lambda **kwargs: FakeConnection(cursor),
+        )
+
+        with patch.dict(sys.modules, {"pymysql": fake_module}):
+            result = fetch_recent_shipments(
+                DbConfig("db.example", 3306, "reader", "secret"),
+                days=7,
+                limit=1,
+            )
+
+        self.assertEqual(result[0].container_no, "EGHU9204414")
+
 
 if __name__ == "__main__":
     unittest.main()

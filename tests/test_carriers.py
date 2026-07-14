@@ -20,6 +20,9 @@ class CarrierTests(unittest.TestCase):
         self.assertEqual(normalize_carrier("OOCL 东方海外 NVO"), Carrier.OOCL)
         self.assertEqual(normalize_carrier("ZIM 以星 NVO"), Carrier.ZIM)
 
+    def test_normalize_wan_hai_database_alias(self) -> None:
+        self.assertEqual(normalize_carrier("WANHAI 万海"), Carrier.WAN_HAI)
+
     def test_parse_carrier_rejects_unknown_value(self) -> None:
         with self.assertRaisesRegex(ValueError, "不支持的船司"):
             parse_carrier("不存在的船司")
