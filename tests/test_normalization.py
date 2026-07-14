@@ -160,6 +160,107 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(result["vessel"]["name"], "MAERSK ELBA")
         self.assertEqual(result["destination_eta"], "2026-08-24T18:00:00.000")
 
+    def test_maersk_selects_latest_actual_and_next_expected_from_shuffled_events(self) -> None:
+        raw = {
+            "containers": [
+                {
+                    "locations": [
+                        {
+                            "city": "QINGDAO",
+                            "events": [
+                                {"event_time": "2026-08-24T18:00:00.000", "activity": "ARRIVAL", "event_time_type": "EXPECTED"},
+                                {"event_time": "2026-07-11T10:05:00.000", "activity": "GATE-OUT", "event_time_type": "ACTUAL"},
+                                {"event_time": "2026-07-18T17:00:00.000", "activity": "DEPARTURE", "event_time_type": "EXPECTED"},
+                                {"event_time": "2026-07-09T08:00:00.000", "activity": "RELEASE", "event_time_type": "ACTUAL"},
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+
+        result = normalize_tracking(Carrier.MAERSK, "MSKU0000001", raw)
+
+        self.assertEqual(result["current"]["status"], "GATE-OUT")
+        self.assertEqual(result["current"]["time"], "2026-07-11T10:05:00.000")
+        self.assertEqual(result["next_expected"]["status"], "DEPARTURE")
+        self.assertEqual(result["events"][0]["time_type"], "EXPECTED")
+
+    def test_normalizes_sm_line_actual_and_expected_events(self) -> None:
+        raw = {
+            "sailing": {"list": [{"polNm": "NINGBO, CHINA", "podNm": "LONG BEACH, US", "eta": "2026-07-28 04:00"}]},
+            "detail": {
+                "list": [
+                    {"eventDt": "2026-07-14 08:58", "statusNm": "Gate In", "placeNm": "NINGBO", "yardNm": "TERMINAL", "actTpCd": "A"},
+                    {"eventDt": "2026-07-16 20:00", "statusNm": "Loaded", "placeNm": "NINGBO", "vslEngNm": "SM SHANGHAI", "skdVoyNo": "2605", "skdDirCd": "E", "actTpCd": "E"},
+                ]
+            },
+        }
+
+        result = normalize_tracking(Carrier.SM_LINE, "SMCU0000001", raw)
+
+        self.assertEqual(result["current"]["status"], "Gate In")
+        self.assertEqual(result["next_expected"]["status"], "Loaded")
+        self.assertEqual(result["vessel"]["name"], "SM SHANGHAI")
+        self.assertEqual(result["vessel"]["voyage"], "2605E")
+        self.assertEqual(result["destination_eta"], "2026-07-28 04:00")
+
+    def test_normalizes_evergreen_latest_row(self) -> None:
+        raw = {
+            "headers": ["箱号", "柜型", "日期", "货柜动态", "地点", "船名 航次", "Method", "VGM"],
+            "rows": [["EGHU0000001", "40'(SH)", "JUL-10-2026", "Empty container returned", "CORK (IE)", "", "Truck", ""]],
+        }
+
+        result = normalize_tracking(Carrier.EVERGREEN, "EGHU0000001", raw)
+
+        self.assertEqual(result["current"]["status"], "Empty container returned")
+        self.assertEqual(result["current"]["location"], "CORK (IE)")
+
+    def test_normalizes_msc_actual_expected_vessel_and_eta(self) -> None:
+        raw = {
+            "Data": {
+                "BillOfLadings": [
+                    {
+                        "GeneralTrackingInfo": {"ShippedFrom": "SHANGHAI, CN", "ShippedTo": "SAVANNAH, US"},
+                        "ContainersInfo": [
+                            {
+                                "ContainerNumber": "TLLU0000001",
+                                "PodEtaDate": "10/08/2026",
+                                "Events": [
+                                    {"Date": "10/08/2026", "Location": "SAVANNAH, US", "Description": "Estimated Time of Arrival", "Detail": ["ZIM AMBER", "14W"], "Vessel": {"IMO": "9967952"}},
+                                    {"Date": "14/07/2026", "Location": "SHANGHAI, CN", "Description": "Estimated Time of Departure", "Detail": ["ZIM AMBER", "14E"], "Vessel": {"IMO": "9967952"}},
+                                    {"Date": "09/07/2026", "Location": "SHANGHAI, CN", "Description": "Export received at CY", "Detail": ["LADEN"], "Vessel": {"IMO": ""}},
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+
+        result = normalize_tracking(Carrier.MSC, "TLLU0000001", raw)
+
+        self.assertEqual(result["current"]["status"], "Export received at CY")
+        self.assertEqual(result["next_expected"]["status"], "Estimated Time of Departure")
+        self.assertEqual(result["vessel"], {"name": "ZIM AMBER", "voyage": "14E", "imo": "9967952"})
+        self.assertEqual(result["destination_eta"], "10/08/2026")
+
+    def test_normalizes_wan_hai_latest_status_and_booking_vessel(self) -> None:
+        raw = {
+            "headers": ["Ctnr No.", "Ctnr Date", "Status Name", "Ctnr Depot Name", "Voyage", "Vessel Name", "More detail"],
+            "rows": [["WHSU0000001", "20260710 16:14", "Full Container Withdrawn", "YUSEN TERMINAL", "", "", "REF"]],
+            "booking_summary": {
+                "headers": ["", "BL no.", "Oboard Date", "Voyage", "Vessel Name", "More detail"],
+                "rows": [["1", "REF", "2026/06/21", "E016", "WAN HAI A03", ""]],
+            },
+        }
+
+        result = normalize_tracking(Carrier.WAN_HAI, "WHSU0000001", raw)
+
+        self.assertEqual(result["current"]["status"], "Full Container Withdrawn")
+        self.assertEqual(result["vessel"]["name"], "WAN HAI A03")
+        self.assertEqual(result["vessel"]["voyage"], "E016")
+
     def test_keeps_fixed_shape_when_a_provider_has_no_mapping(self) -> None:
         result = normalize_tracking(Carrier.ONE, "BEAU5347896", {"rows": [["unknown"]]})
 

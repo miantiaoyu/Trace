@@ -6,7 +6,7 @@ from typing import Callable, Mapping
 from trace_api_probe.carriers import Carrier, normalize_carrier
 from trace_api_probe.db import ShipmentSample
 from trace_api_probe.execution import QueryExecutor, QueryPolicy
-from trace_api_probe.normalization import normalize_tracking
+from trace_api_probe.normalization import empty_tracking_summary, normalize_tracking
 
 
 class UnsupportedTrackingError(RuntimeError):
@@ -39,7 +39,7 @@ HTTP_POLICY = QueryPolicy(min_interval_seconds=2, timeout_seconds=45, max_attemp
 DOM_POLICY = QueryPolicy(min_interval_seconds=4, timeout_seconds=60, max_attempts=2)
 BROWSER_POLICY = QueryPolicy(min_interval_seconds=6, timeout_seconds=90, max_attempts=2)
 WAN_HAI_POLICY = QueryPolicy(min_interval_seconds=8, timeout_seconds=120, max_attempts=1)
-HMM_POLICY = QueryPolicy(min_interval_seconds=8, timeout_seconds=90, max_attempts=1)
+HMM_POLICY = QueryPolicy(min_interval_seconds=12, timeout_seconds=90, max_attempts=2)
 
 
 def _yang_ming(container: str, options: TrackingOptions) -> object:
@@ -166,27 +166,44 @@ class TrackingRouter:
             return result
 
         result.update(route=route.name, route_description=route.description)
+        policy = _effective_policy(route.policy, options)
         try:
             raw, execution = self._executor.execute(
                 carrier.value,
                 route.adapter,
                 sample.container_no,
                 options,
-                _effective_policy(route.policy, options),
+                policy,
             )
         except Exception as exc:
             result.update(
                 status="query_failed",
+                execution={
+                    "attempts": getattr(exc, "query_attempts", 1),
+                    "timeout_seconds": policy.timeout_seconds,
+                    "elapsed_seconds": getattr(exc, "query_elapsed_seconds", None),
+                },
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
             return result
 
-        result.update(
-            status="success",
-            execution=execution,
-            normalized=normalize_tracking(carrier, sample.container_no, raw),
-            raw=raw,
-        )
+        try:
+            normalized = normalize_tracking(carrier, sample.container_no, raw)
+        except Exception as exc:
+            result.update(
+                status="partial_success",
+                execution=execution,
+                normalized=empty_tracking_summary(carrier, sample.container_no),
+                raw=raw,
+                error={
+                    "stage": "normalization",
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+            return result
+
+        result.update(status="success", execution=execution, normalized=normalized, raw=raw)
         return result
 
 
@@ -197,7 +214,24 @@ def query_samples(
     router: TrackingRouter | None = None,
 ) -> list[dict[str, object]]:
     active_router = router or TrackingRouter()
-    return [active_router.query(sample, options) for sample in samples]
+    results = []
+    for sample in samples:
+        try:
+            results.append(active_router.query(sample, options))
+        except Exception as exc:
+            carrier = normalize_carrier(sample.shipping_company)
+            result = _sample_metadata(sample, carrier)
+            result.update(
+                status="internal_error",
+                route="unknown",
+                error={
+                    "stage": "routing",
+                    "type": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+            results.append(result)
+    return results
 
 
 def _sample_metadata(sample: ShipmentSample, carrier: Carrier | None) -> dict[str, object]:

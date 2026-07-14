@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from trace_api_probe.carriers import Carrier
 from trace_api_probe.db import ShipmentSample
@@ -66,6 +67,33 @@ class TrackingRouterTests(unittest.TestCase):
 
         self.assertEqual(result["carrier"], "HMM")
         self.assertEqual(result["status"], "success")
+
+    def test_normalization_failure_keeps_raw_and_does_not_raise(self) -> None:
+        routes = {
+            Carrier.YANG_MING: CarrierRoute("fake", "测试路线", lambda container, options: {"payload": container})
+        }
+
+        with patch("trace_api_probe.tracking.normalize_tracking", side_effect=ValueError("字段结构变化")):
+            result = TrackingRouter(routes).query(sample(), TrackingOptions())
+
+        self.assertEqual(result["status"], "partial_success")
+        self.assertEqual(result["raw"], {"payload": "YMMU7349033"})
+        self.assertEqual(result["error"]["stage"], "normalization")
+
+    def test_batch_isolates_unexpected_router_exception(self) -> None:
+        class BrokenRouter:
+            def query(self, shipment, options):
+                if shipment.container_no.endswith("1"):
+                    raise AssertionError("意外异常")
+                return {"container": shipment.container_no, "status": "success"}
+
+        results = query_samples(
+            [sample(container="YMMU0000001"), sample(container="YMMU0000002")],
+            router=BrokenRouter(),
+        )
+
+        self.assertEqual(results[0]["status"], "internal_error")
+        self.assertEqual(results[1]["status"], "success")
 
 
 if __name__ == "__main__":

@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
         )
         _print_json(report)
-        return 0 if report["summary"]["failed"] == 0 else 1
+        return 0 if report["summary"]["failed"] == 0 and report["summary"]["partial"] == 0 else 1
     except Exception as exc:
         print(f"执行失败：{exc}", file=sys.stderr)
         return 1
@@ -99,7 +99,8 @@ def _build_report(
 ) -> dict[str, object]:
     results = query_samples(samples, options=options)
     success = sum(result["status"] == "success" for result in results)
-    failed = len(results) - success
+    partial = sum(result["status"] == "partial_success" for result in results)
+    failed = len(results) - success - partial
     return {
         "query": {
             "source": "trobs.po_cabinet_combination",
@@ -109,7 +110,7 @@ def _build_report(
             "carrier": carrier.value if carrier else None,
             "count": len(samples),
         },
-        "summary": {"total": len(results), "success": success, "failed": failed},
+        "summary": {"total": len(results), "success": success, "partial": partial, "failed": failed},
         "results": results,
     }
 

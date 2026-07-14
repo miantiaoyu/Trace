@@ -67,19 +67,50 @@ python -m trace_api_probe --carrier YML --container YMMU7349033
 python -m trace_api_probe --timeout-seconds 90 --max-attempts 2 --min-interval-seconds 5
 ```
 
-输出报告包含 `query`、`summary` 和 `results`。每条 `results` 记录包含数据库样本信息、归一化船司、路线、执行次数、状态、`normalized` 统一摘要和 `raw` 原始返回；网页受限或凭证缺失时会在对应记录中返回错误，不会让其他记录消失。
+输出报告包含 `query`、`summary` 和 `results`。`summary` 分别统计 `success`、`partial` 和 `failed`。每条 `results` 记录包含数据库样本信息、归一化船司、路线、执行次数、状态、`normalized` 统一摘要和 `raw` 原始返回；网页受限、超时或解析异常只影响当前柜号，不会让其他记录消失。
 
 `normalized` 的固定字段包括：
 
 ```text
 current: 当前时间、状态、地点、运输方式
+next_expected: 下一条预计事件
 vessel: 船名、航次、IMO
 origin / destination / destination_eta
-events: 统一事件列表
+events: 统一事件列表；每条事件包含 time_type、船名、航次和 IMO 等来源字段
 coverage: 当前来源实际提供了哪些字段
 ```
 
 原始 `raw` 永远保留。字段不足时摘要填 `null` 或空数组，不能用推测值补齐。
+
+事件时间类型：
+
+- `ACTUAL`：船司确认已经发生的事件，可以用于判断当前状态。
+- `EXPECTED`：船期、ETA 或系统预测的未来事件，可能随航线和港口情况变化，不能当作当前位置。
+- `null`：来源没有提供足够信息区分实际与预计，程序不自行猜测。
+
+当来源同时提供两类事件时，`current` 取时间最新的 `ACTUAL`，`next_expected` 取当前状态之后时间最早的 `EXPECTED`。顶层船名航次优先来自当前实际事件，其次来自下一预计事件。
+
+## 查询状态与故障隔离
+
+- `success`：官网查询和统一解析均成功。
+- `partial_success`：官网原始数据已经取得，但统一解析发生异常；保留 `raw` 和空摘要，后续柜号继续执行。
+- `query_failed`：当前柜号的官网查询失败或重试耗尽。
+- `internal_error`：当前柜号发生未预期的路由异常；异常被单柜隔离，后续柜号继续执行。
+- `route_unavailable`：船司已识别，但没有稳定自动化路线。
+
+每个真实查询在独立 Python 子进程中运行。超过硬超时后父进程会终止该子进程，浏览器崩溃或页面卡死不会阻塞整个批次。
+
+## 默认限速与重试
+
+| 路线 | 最小间隔 | 单次硬超时 | 最大尝试次数 |
+| --- | ---: | ---: | ---: |
+| 阳明、SM Line、长荣 | 2 秒 | 45 秒 | 2 |
+| COSCO、ONE | 4 秒 | 60 秒 | 2 |
+| 马士基、MSC | 6 秒 | 90 秒 | 2 |
+| 万海 | 8 秒 | 120 秒 | 1 |
+| HMM | 12 秒 | 90 秒 | 2 |
+
+只有可恢复错误才重试，包括硬超时、连接中断、浏览器访问失败、HTTP 429 和 HTTP 5xx。柜号无数据、页面契约变化、参数错误、验证码或访问拒绝不会重试。重试前仍遵守同船司最小访问间隔，没有无限重试。
 
 ## 常见问题
 

@@ -73,11 +73,13 @@ class QueryExecutor:
                     "timeout_seconds": policy.timeout_seconds,
                     "elapsed_seconds": round(self._clock() - started_at, 3),
                 }
-            except QueryTimeoutError:
+            except QueryTimeoutError as exc:
                 if attempt == policy.max_attempts:
+                    _attach_failure_metadata(exc, attempts, self._clock() - started_at)
                     raise
             except Exception as exc:
                 if not _is_transient_error(exc) or attempt == policy.max_attempts:
+                    _attach_failure_metadata(exc, attempts, self._clock() - started_at)
                     raise
 
         raise AssertionError("查询尝试流程不应到达这里")
@@ -149,4 +151,33 @@ def _is_transient_error(exc: Exception) -> bool:
     if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
         return True
     text = str(exc).lower()
-    return any(marker in text for marker in ("timeout", "temporarily", "connection reset", "connection aborted"))
+    return any(
+        marker in text
+        for marker in (
+            "timeout",
+            "temporarily",
+            "connection reset",
+            "connection aborted",
+            "连接失败",
+            "无法连接",
+            "查询超时",
+            "未返回追踪结果",
+            "未返回轨迹数据",
+            "浏览器启动或页面访问失败",
+            "http 429",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+        )
+    )
+
+
+def _attach_failure_metadata(exc: BaseException | None, attempts: int, elapsed_seconds: float) -> None:
+    if exc is None:
+        return
+    try:
+        setattr(exc, "query_attempts", attempts)
+        setattr(exc, "query_elapsed_seconds", round(elapsed_seconds, 3))
+    except Exception:
+        return

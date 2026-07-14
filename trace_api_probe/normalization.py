@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any, Callable, Mapping
 
 from trace_api_probe.carriers import Carrier
@@ -8,19 +9,20 @@ from trace_api_probe.carriers import Carrier
 
 def normalize_tracking(carrier: Carrier, container: str, raw: object) -> dict[str, object]:
     """返回固定摘要字段，同时允许 raw 保留船司特有数据。"""
-    result = _empty_summary(carrier, container)
+    result = empty_tracking_summary(carrier, container)
     normalizer = _NORMALIZERS.get(carrier)
     if normalizer is None or not isinstance(raw, Mapping):
         return result
     return normalizer(result, raw)
 
 
-def _empty_summary(carrier: Carrier, container: str) -> dict[str, object]:
+def empty_tracking_summary(carrier: Carrier, container: str) -> dict[str, object]:
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "carrier": carrier.value,
         "container": container,
         "current": {"time": None, "status": None, "location": None, "mode": None},
+        "next_expected": {"time": None, "status": None, "location": None, "mode": None},
         "vessel": {"name": None, "voyage": None, "imo": None},
         "origin": None,
         "destination": None,
@@ -28,6 +30,7 @@ def _empty_summary(carrier: Carrier, container: str) -> dict[str, object]:
         "events": [],
         "coverage": {
             "current": False,
+            "next_expected": False,
             "events": False,
             "vessel": False,
             "eta": False,
@@ -140,6 +143,8 @@ def _hmm_events(tables: list[object]) -> list[dict[str, object]]:
                     "mode": "Vessel" if vessel else raw_mode,
                     "vessel": vessel,
                     "voyage": voyage,
+                    "imo": None,
+                    "time_type": "ACTUAL",
                 }
             )
         if events:
@@ -189,6 +194,8 @@ def _normalize_cosco(result: dict[str, object], raw: Mapping[str, Any]) -> dict[
                 "mode": _at(values, indexes["运输方式"]) if "运输方式" in indexes else None,
                 "vessel": None,
                 "voyage": None,
+                "imo": None,
+                "time_type": None,
             }
         )
     _apply_events(result, events)
@@ -217,6 +224,8 @@ def _normalize_one(result: dict[str, object], raw: Mapping[str, Any]) -> dict[st
                 "mode": None,
                 "vessel": vessel,
                 "voyage": voyage,
+                "imo": None,
+                "time_type": None,
             }
         )
     _apply_events(result, events)
@@ -256,15 +265,193 @@ def _normalize_maersk(result: dict[str, object], raw: Mapping[str, Any]) -> dict
                         "mode": _text(item.get("transport_mode")),
                         "vessel": _text(item.get("vessel_name")),
                         "voyage": _text(item.get("voyage_num")),
+                        "imo": None,
+                        "time_type": _time_type(item.get("event_time_type")),
                     }
                 )
     _apply_events(result, events)
-    for event in events:
-        if event["vessel"] or event["voyage"]:
-            result["vessel"] = {"name": event["vessel"], "voyage": event["voyage"], "imo": None}
-            _coverage(result)["vessel"] = True
-            break
     return result
+
+
+def _normalize_sm_line(result: dict[str, object], raw: Mapping[str, Any]) -> dict[str, object]:
+    sailing_rows = _response_rows(raw.get("sailing"))
+    if sailing_rows:
+        sailing = sailing_rows[0]
+        result["origin"] = _text(sailing.get("polNm"))
+        result["destination"] = _text(sailing.get("podNm"))
+        eta = _text(sailing.get("eta"))
+        if eta:
+            result["destination_eta"] = eta
+            _coverage(result)["eta"] = True
+
+    events = []
+    for item in _response_rows(raw.get("detail")):
+        vessel = _text(item.get("vslEngNm"))
+        voyage = _join_compact(item.get("skdVoyNo"), item.get("skdDirCd"))
+        location = _join_location(_text(item.get("placeNm")), _text(item.get("yardNm")))
+        act_type = _text(item.get("actTpCd"))
+        events.append(
+            {
+                "time": _text(item.get("eventDt")),
+                "status": _clean_text(item.get("statusNm")),
+                "location": location,
+                "mode": "Vessel" if vessel else None,
+                "vessel": vessel,
+                "voyage": voyage,
+                "imo": None,
+                "time_type": {"A": "ACTUAL", "E": "EXPECTED"}.get((act_type or "").upper()),
+            }
+        )
+    _apply_events(result, events)
+    return result
+
+
+def _normalize_evergreen(result: dict[str, object], raw: Mapping[str, Any]) -> dict[str, object]:
+    events = []
+    for item in _table_records(raw.get("headers"), raw.get("rows")):
+        vessel, voyage = _split_vessel_voyage(item.get("船名 航次"))
+        events.append(
+            {
+                "time": _text(item.get("日期")),
+                "status": _text(item.get("货柜动态")),
+                "location": _text(item.get("地点")),
+                "mode": _text(item.get("Method")) or ("Vessel" if vessel else None),
+                "vessel": vessel,
+                "voyage": voyage,
+                "imo": None,
+                "time_type": None,
+            }
+        )
+    _apply_events(result, events)
+    return result
+
+
+def _normalize_msc(result: dict[str, object], raw: Mapping[str, Any]) -> dict[str, object]:
+    data = raw.get("Data")
+    if not isinstance(data, Mapping):
+        return result
+    bills = data.get("BillOfLadings")
+    if not isinstance(bills, list):
+        return result
+
+    container_info: Mapping[str, Any] | None = None
+    for bill in bills:
+        if not isinstance(bill, Mapping):
+            continue
+        general = bill.get("GeneralTrackingInfo")
+        containers = bill.get("ContainersInfo")
+        if not isinstance(containers, list):
+            continue
+        for item in containers:
+            if not isinstance(item, Mapping):
+                continue
+            if _text(item.get("ContainerNumber")) != result["container"]:
+                continue
+            container_info = item
+            if isinstance(general, Mapping):
+                result["origin"] = _text(general.get("ShippedFrom")) or _text(general.get("PortOfLoad"))
+                result["destination"] = _text(general.get("ShippedTo")) or _text(general.get("PortOfDischarge"))
+                eta = _text(item.get("PodEtaDate")) or _text(general.get("FinalPodEtaDate"))
+                if eta:
+                    result["destination_eta"] = eta
+                    _coverage(result)["eta"] = True
+            break
+        if container_info is not None:
+            break
+
+    if container_info is None:
+        return result
+    events = []
+    source_events = container_info.get("Events")
+    if isinstance(source_events, list):
+        for item in source_events:
+            if not isinstance(item, Mapping):
+                continue
+            description = _text(item.get("Description"))
+            detail = item.get("Detail")
+            detail_values = detail if isinstance(detail, list) else []
+            vessel_data = item.get("Vessel")
+            imo = _text(vessel_data.get("IMO")) if isinstance(vessel_data, Mapping) else None
+            vessel = _text(detail_values[0]) if len(detail_values) >= 2 else None
+            voyage = _text(detail_values[1]) if vessel and len(detail_values) >= 2 else None
+            events.append(
+                {
+                    "time": _text(item.get("Date")),
+                    "status": description,
+                    "location": _text(item.get("Location")),
+                    "mode": "Vessel" if vessel else None,
+                    "vessel": vessel,
+                    "voyage": voyage,
+                    "imo": imo,
+                    "time_type": "EXPECTED" if description and "estimated" in description.lower() else "ACTUAL",
+                }
+            )
+    _apply_events(result, events)
+    return result
+
+
+def _normalize_wan_hai(result: dict[str, object], raw: Mapping[str, Any]) -> dict[str, object]:
+    events = []
+    for item in _table_records(raw.get("headers"), raw.get("rows")):
+        vessel = _text(item.get("Vessel Name"))
+        voyage = _text(item.get("Voyage"))
+        events.append(
+            {
+                "time": _text(item.get("Ctnr Date")),
+                "status": _text(item.get("Status Name")),
+                "location": _text(item.get("Ctnr Depot Name")),
+                "mode": "Vessel" if vessel else None,
+                "vessel": vessel,
+                "voyage": voyage,
+                "imo": None,
+                "time_type": "ACTUAL",
+            }
+        )
+    _apply_events(result, events)
+
+    if not _coverage(result)["vessel"]:
+        summary = raw.get("booking_summary")
+        if isinstance(summary, Mapping):
+            records = _table_records(summary.get("headers"), summary.get("rows"))
+            if records:
+                vessel = _text(records[0].get("Vessel Name"))
+                voyage = _text(records[0].get("Voyage"))
+                if vessel or voyage:
+                    result["vessel"] = {"name": vessel, "voyage": voyage, "imo": None}
+                    _coverage(result)["vessel"] = True
+    return result
+
+
+def _response_rows(value: object) -> list[Mapping[str, Any]]:
+    if not isinstance(value, Mapping):
+        return []
+    rows = value.get("list")
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, Mapping)]
+
+
+def _table_records(headers: object, rows: object) -> list[dict[str, object]]:
+    if not isinstance(headers, list) or not isinstance(rows, list):
+        return []
+    labels = [str(value).strip() for value in headers]
+    records = []
+    for row in rows:
+        if not isinstance(row, list):
+            continue
+        records.append({label: row[index] if index < len(row) else None for index, label in enumerate(labels)})
+    return records
+
+
+def _join_location(location: str | None, terminal: str | None) -> str | None:
+    if location and terminal:
+        return f"{location} - {terminal}"
+    return location or terminal
+
+
+def _join_compact(*values: object) -> str | None:
+    merged = "".join(value for item in values if (value := _text(item)))
+    return merged or None
 
 
 def _event_list(
@@ -289,6 +476,8 @@ def _event_list(
                 "mode": _text(item.get(mode_key)),
                 "vessel": None,
                 "voyage": _text(item.get(voyage_key)),
+                "imo": None,
+                "time_type": None,
             }
         )
     return events
@@ -300,19 +489,97 @@ def _apply_events(result: dict[str, object], events: list[dict[str, object]]) ->
     coverage["events"] = bool(events)
     if not events:
         return
-    current = events[0]
-    result["current"] = {
-        "time": current["time"],
-        "status": current["status"],
-        "location": current["location"],
-        "mode": current["mode"],
+
+    typed_events = [event for event in events if event.get("time_type") in {"ACTUAL", "EXPECTED"}]
+    actual_events = [event for event in typed_events if event.get("time_type") == "ACTUAL"]
+    expected_events = [event for event in typed_events if event.get("time_type") == "EXPECTED"]
+    current = _latest_event(actual_events) if typed_events else events[0]
+    if current is not None:
+        result["current"] = _event_snapshot(current)
+        coverage["current"] = bool(current.get("status") or current.get("location"))
+
+    next_expected = _next_expected_event(expected_events, current)
+    if next_expected is not None:
+        result["next_expected"] = _event_snapshot(next_expected)
+        coverage["next_expected"] = True
+
+    vessel_event = next(
+        (
+            event
+            for event in (current, next_expected, *events)
+            if event is not None and (event.get("vessel") or event.get("voyage") or event.get("imo"))
+        ),
+        None,
+    )
+    if vessel_event is not None:
+        result["vessel"] = {
+            "name": vessel_event.get("vessel"),
+            "voyage": vessel_event.get("voyage"),
+            "imo": vessel_event.get("imo"),
+        }
+        coverage["vessel"] = True
+
+
+def _event_snapshot(event: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "time": event.get("time"),
+        "status": event.get("status"),
+        "location": event.get("location"),
+        "mode": event.get("mode"),
     }
-    coverage["current"] = bool(current["status"] or current["location"])
-    for event in events:
-        if event["vessel"] or event["voyage"]:
-            result["vessel"] = {"name": event["vessel"], "voyage": event["voyage"], "imo": None}
-            coverage["vessel"] = True
-            break
+
+
+def _latest_event(events: list[dict[str, object]]) -> dict[str, object] | None:
+    return max(events, key=_event_time_key) if events else None
+
+
+def _next_expected_event(
+    events: list[dict[str, object]],
+    current: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    if not events:
+        return None
+    current_key = _event_time_key(current) if current is not None else None
+    future = [event for event in events if current_key is None or _event_time_key(event) >= current_key]
+    return min(future or events, key=_event_time_key)
+
+
+def _event_time_key(event: Mapping[str, object]) -> tuple[int, str]:
+    value = _text(event.get("time"))
+    parsed = _parse_datetime(value)
+    return (int(parsed.timestamp()), value or "") if parsed is not None else (-1, value or "")
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+    except ValueError:
+        pass
+    for pattern in (
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d",
+        "%Y%m%d %H:%M",
+        "%b-%d-%Y",
+    ):
+        try:
+            return datetime.strptime(value, pattern)
+        except ValueError:
+            continue
+    return None
+
+
+def _time_type(value: object) -> str | None:
+    normalized = _text(value)
+    if normalized is None:
+        return None
+    upper = normalized.upper()
+    return upper if upper in {"ACTUAL", "EXPECTED"} else None
 
 
 def _coverage(result: dict[str, object]) -> dict[str, bool]:
@@ -377,14 +644,27 @@ def _text(value: object) -> str | None:
     return text or None
 
 
+def _clean_text(value: object) -> str | None:
+    text = _text(value)
+    if text is None:
+        return None
+    cleaned = re.sub(r"<br\s*/?>", " / ", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<[^>]+>", "", cleaned)
+    return " ".join(cleaned.split()) or None
+
+
 def _label(value: object) -> str:
     return " ".join(str(value).strip().lower().split())
 
 
 _NORMALIZERS: Mapping[Carrier, Callable[[dict[str, object], Mapping[str, Any]], dict[str, object]]] = {
     Carrier.YANG_MING: _normalize_yang_ming,
+    Carrier.SM_LINE: _normalize_sm_line,
+    Carrier.EVERGREEN: _normalize_evergreen,
     Carrier.HMM: _normalize_hmm,
     Carrier.COSCO: _normalize_cosco,
     Carrier.ONE: _normalize_one,
     Carrier.MAERSK: _normalize_maersk,
+    Carrier.MSC: _normalize_msc,
+    Carrier.WAN_HAI: _normalize_wan_hai,
 }

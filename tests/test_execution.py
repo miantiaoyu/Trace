@@ -63,6 +63,48 @@ class QueryExecutorTests(unittest.TestCase):
 
         self.assertEqual(sleeps, [3])
 
+    def test_retries_provider_chinese_timeout_message(self) -> None:
+        attempts = []
+
+        def runner(carrier, adapter, container, options, timeout_seconds):
+            attempts.append(container)
+            if len(attempts) == 1:
+                raise RuntimeError("HMM 官网在 60 秒内未返回追踪结果")
+            return {"container": container}
+
+        executor = QueryExecutor(runner=runner, clock=lambda: 10.0, sleep=lambda seconds: None)
+        result, metadata = executor.execute(
+            "HMM",
+            lambda container, options: None,
+            "HMMU0000001",
+            object(),
+            QueryPolicy(min_interval_seconds=0, timeout_seconds=90, max_attempts=2),
+        )
+
+        self.assertEqual(result["container"], "HMMU0000001")
+        self.assertEqual(metadata["attempts"], 2)
+
+    def test_final_failure_contains_attempt_metadata(self) -> None:
+        now = [0.0]
+
+        def runner(carrier, adapter, container, options, timeout_seconds):
+            now[0] += 2
+            raise RuntimeError("连接失败")
+
+        executor = QueryExecutor(runner=runner, clock=lambda: now[0], sleep=lambda seconds: None)
+
+        with self.assertRaises(RuntimeError) as raised:
+            executor.execute(
+                "HMM",
+                lambda container, options: None,
+                "HMMU0000001",
+                object(),
+                QueryPolicy(min_interval_seconds=0, timeout_seconds=90, max_attempts=2),
+            )
+
+        self.assertEqual(raised.exception.query_attempts, 2)
+        self.assertEqual(raised.exception.query_elapsed_seconds, 4)
+
 
 if __name__ == "__main__":
     unittest.main()
