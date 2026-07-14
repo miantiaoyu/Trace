@@ -32,11 +32,11 @@ class QueryExecutorTests(unittest.TestCase):
 
         def runner(carrier, adapter, container, options, timeout_seconds):
             attempts.append(container)
-            raise RuntimeError("缺少 API 凭证")
+            raise RuntimeError("查询参数无效")
 
         executor = QueryExecutor(runner=runner, clock=lambda: 10.0, sleep=lambda seconds: None)
 
-        with self.assertRaisesRegex(RuntimeError, "缺少 API 凭证"):
+        with self.assertRaisesRegex(RuntimeError, "查询参数无效"):
             executor.execute(
                 carrier="CMA_CGM",
                 adapter=lambda container, options: None,

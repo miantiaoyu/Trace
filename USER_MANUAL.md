@@ -2,7 +2,7 @@
 
 ## 项目简介
 
-Trace 是一个只读的船司 Track & Trace 查询工具。它从公司只读库读取最近订单中的船司和柜号，根据船司进入不同的官网/API 路线，并在控制台输出统一 JSON 报告。
+Trace 是一个只读的船司 Track & Trace 查询工具。它从公司只读库读取最近订单中的船司和柜号，根据船司进入不同的官网 HTTP/浏览器路线，并在控制台输出统一 JSON 报告。
 
 ## 安装/准备
 
@@ -80,25 +80,6 @@ coverage: 当前来源实际提供了哪些字段
 ```
 
 原始 `raw` 永远保留。字段不足时摘要填 `null` 或空数组，不能用推测值补齐。
-
-## API 凭证
-
-当前 CMA CGM 仍走官方 API 凭证路线，未配置时对应记录会返回缺少凭证的错误。其他已验证船司优先走官网公开页面或官网自身请求，不需要额外 API 凭证。
-
-支持的环境变量：
-
-```text
-MAERSK_API_KEY
-MAERSK_CLIENT_ID
-MAERSK_BEARER_TOKEN
-MAERSK_TRACK_TRACE_URL
-CMA_CGM_API_KEY
-CMA_CGM_BEARER_TOKEN
-CMA_CGM_TRACK_TRACE_URL
-MSC_API_KEY
-MSC_BEARER_TOKEN
-MSC_TRACK_TRACE_URL
-```
 
 ## 常见问题
 
@@ -202,5 +183,3 @@ E:\miniconda\envs\py312\python.exe -m crawler_lab.wan_hai_probe --container WHSU
 ## 注意事项
 
 - 不要提交 `prod-db.yml`。
-- 不要把 API 凭证写入 `prod-db.yml`。
-- 船司实际开通后的 API 地址或认证头可能不同，可通过环境变量覆盖默认地址。

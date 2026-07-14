@@ -37,6 +37,12 @@ class TrackingRouterTests(unittest.TestCase):
         self.assertEqual(result["carrier"], "OOCL")
         self.assertEqual(result["status"], "route_unavailable")
 
+    def test_cma_without_web_route_is_unavailable(self) -> None:
+        result = TrackingRouter().query(sample("CMA 达飞", "CMAU4616180"))
+
+        self.assertEqual(result["carrier"], "CMA_CGM")
+        self.assertEqual(result["status"], "route_unavailable")
+
     def test_unknown_carrier_is_reported_as_data(self) -> None:
         result = TrackingRouter().query(sample("未知船司", "ABCU1234567"))
 

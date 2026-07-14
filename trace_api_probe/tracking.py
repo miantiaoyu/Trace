@@ -40,7 +40,6 @@ DOM_POLICY = QueryPolicy(min_interval_seconds=4, timeout_seconds=60, max_attempt
 BROWSER_POLICY = QueryPolicy(min_interval_seconds=6, timeout_seconds=90, max_attempts=2)
 WAN_HAI_POLICY = QueryPolicy(min_interval_seconds=8, timeout_seconds=120, max_attempts=1)
 HMM_POLICY = QueryPolicy(min_interval_seconds=8, timeout_seconds=90, max_attempts=1)
-API_POLICY = QueryPolicy(min_interval_seconds=2, timeout_seconds=45, max_attempts=1)
 
 
 def _yang_ming(container: str, options: TrackingOptions) -> object:
@@ -111,16 +110,6 @@ def _hmm(container: str, options: TrackingOptions) -> object:
     )
 
 
-def _official_api(carrier: Carrier, container: str, options: TrackingOptions) -> object:
-    from trace_api_probe.providers import provider_for
-
-    return provider_for(carrier).fetch_raw(container)
-
-
-def _cma_cgm(container: str, options: TrackingOptions) -> object:
-    return _official_api(Carrier.CMA_CGM, container, options)
-
-
 ROUTES: Mapping[Carrier, CarrierRoute] = {
     Carrier.YANG_MING: CarrierRoute("yang_ming_json", "阳明官网公开 JSON", _yang_ming, HTTP_POLICY),
     Carrier.SM_LINE: CarrierRoute("sm_line_json", "SM Line 官网会话 JSON", _sm_line, HTTP_POLICY),
@@ -131,7 +120,7 @@ ROUTES: Mapping[Carrier, CarrierRoute] = {
     Carrier.MSC: CarrierRoute("msc_browser_json", "MSC 官网页面 JSON", _msc, BROWSER_POLICY),
     Carrier.WAN_HAI: CarrierRoute("wan_hai_form_html", "万海官网会话表单 HTML", _wan_hai, WAN_HAI_POLICY),
     Carrier.HMM: CarrierRoute("hmm_browser_html", "HMM 官网有界浏览器 HTML", _hmm, HMM_POLICY),
-    Carrier.CMA_CGM: CarrierRoute("cma_cgm_official_api", "CMA CGM 官方 API（需要凭证）", _cma_cgm, API_POLICY),
+    Carrier.CMA_CGM: CarrierRoute("cma_cgm_unavailable", "CMA CGM 当前没有可执行的网页查询路线", None),
     Carrier.APL: CarrierRoute("apl_unavailable", "APL 当前没有稳定的直接查询路线", None),
     Carrier.OOCL: CarrierRoute("oocl_unavailable", "OOCL 当前受 Cloudflare 人机验证限制", None),
     Carrier.ZIM: CarrierRoute("zim_unavailable", "ZIM 当前受 Cloudflare 访问限制", None),

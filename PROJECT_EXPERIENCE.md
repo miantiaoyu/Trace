@@ -36,4 +36,4 @@
 - 需要人工验证码，当前不绕过：CMA CGM（DataDome）、OOCL（Cloudflare Turnstile）、ZIM 中国站（Cloudflare）、TS Lines（查询表单含验证码）、Hapag-Lloyd（Cloudflare）。
 - 访问前置校验或 CDN 拒绝：KMTC（Akamai HTTP 403）。
 - 临时服务不可用：SeaLead 的表单可提交，但官网返回追踪页维护通知。
-- APL 目前入口返回 HTTP 403；其与 CMA CGM 同属集团，后续应优先通过 CMA CGM 正式 API 或人工可用会话复查，不把单次 403 解释为业务不支持。
+- APL 目前入口返回 HTTP 403。未验证到稳定的官网查询路线前，统一入口保持 `route_unavailable`；不接入 API 凭证、人工会话或验证码处理作为替代方案。

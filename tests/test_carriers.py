@@ -16,6 +16,10 @@ class CarrierTests(unittest.TestCase):
     def test_normalize_hmm_prefix_with_mojibake_suffix(self) -> None:
         self.assertEqual(normalize_carrier("HMM ş«ĐÂ BCO"), Carrier.HMM)
 
+    def test_normalize_oocl_and_zim_bco_nvo_aliases(self) -> None:
+        self.assertEqual(normalize_carrier("OOCL 东方海外 NVO"), Carrier.OOCL)
+        self.assertEqual(normalize_carrier("ZIM 以星 NVO"), Carrier.ZIM)
+
     def test_parse_carrier_rejects_unknown_value(self) -> None:
         with self.assertRaisesRegex(ValueError, "不支持的船司"):
             parse_carrier("不存在的船司")
