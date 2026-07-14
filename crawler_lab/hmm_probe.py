@@ -117,14 +117,46 @@ def _build_result(raw_html: str, container: str) -> dict[str, object]:
 
     parser = ResultTablesParser()
     parser.feed(raw_html)
+    table_headers = [table[0] for table in parser.tables if table]
+    sections = {
+        "route": _has_headers(table_headers, {"origin", "destination"}),
+        "container_summary": _has_headers(table_headers, {"container no.", "movement"}),
+        "vessel_legs": _has_headers(table_headers, {"vessel / voyage", "loading port", "discharging port"}),
+        "events": _has_event_headers(table_headers),
+    }
+    if not sections["container_summary"]:
+        raise HmmTrackingError("HMM 追踪响应未识别到柜信息表，页面结构可能已变化")
     return {
         "carrier": "HMM",
         "container": container,
         "query_url": TRACKING_PAGE_URL,
         "result_endpoint": TRACKING_RESPONSE_PATH,
         "tables": parser.tables,
+        "parse_diagnostics": {
+            "table_count": len(parser.tables),
+            "table_headers": table_headers,
+            "sections": sections,
+        },
         "raw_html": raw_html,
     }
+
+
+def _has_headers(headers: list[list[str]], required: set[str]) -> bool:
+    return any(required.issubset({_label(value) for value in header}) for header in headers)
+
+
+def _has_event_headers(headers: list[list[str]]) -> bool:
+    for header in headers:
+        labels = {_label(value) for value in header}
+        if {"location", "status description"}.issubset(labels) and (
+            {"date", "time"}.issubset(labels) or "date / time" in labels
+        ):
+            return True
+    return False
+
+
+def _label(value: object) -> str:
+    return " ".join(str(value).strip().lower().split())
 
 
 def main(argv: list[str] | None = None) -> int:

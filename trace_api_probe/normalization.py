@@ -53,32 +53,121 @@ def _normalize_hmm(result: dict[str, object], raw: Mapping[str, Any]) -> dict[st
     tables = raw.get("tables")
     if not isinstance(tables, list):
         return result
+
+    route_table = _hmm_route_table(tables)
+    if route_table is not None:
+        header, rows = route_table
+        origin_index = header.index("origin")
+        destination_index = header.index("destination")
+        result["origin"] = _hmm_location(rows, origin_index)
+        result["destination"] = _hmm_location(rows, destination_index)
+        eta = _at(rows.get("arrival(etb)", []), destination_index)
+        if eta:
+            result["destination_eta"] = eta
+            _coverage(result)["eta"] = True
+
+    events = _hmm_events(tables)
+    _apply_events(result, events)
+
+    if not _coverage(result)["vessel"]:
+        vessels = _hmm_vessels(tables)
+        if vessels:
+            result["vessel"] = {"name": vessels[0][0], "voyage": vessels[0][1], "imo": None}
+            _coverage(result)["vessel"] = True
+    return result
+
+
+def _hmm_route_table(tables: list[object]) -> tuple[list[str], dict[str, list[object]]] | None:
     for table in tables:
-        if not isinstance(table, list) or len(table) < 2:
+        if not isinstance(table, list) or len(table) < 2 or not isinstance(table[0], list):
             continue
-        header = [str(value).strip().lower() for value in table[0]]
-        if not {"date", "time", "location", "status description"}.issubset(header):
+        header = [_label(value) for value in table[0]]
+        if not {"origin", "destination"}.issubset(header):
             continue
-        indexes = {name: header.index(name) for name in ("date", "time", "location", "status description")}
+        rows = {
+            _label(row[0]): row
+            for row in table[1:]
+            if isinstance(row, list) and row and _label(row[0])
+        }
+        if "location" in rows:
+            return header, rows
+    return None
+
+
+def _hmm_location(rows: Mapping[str, list[object]], index: int) -> str | None:
+    location = _at(rows.get("location", []), index)
+    terminal = _at(rows.get("terminal", []), index)
+    if location and terminal:
+        return f"{location} - {terminal}"
+    return location or terminal
+
+
+def _hmm_events(tables: list[object]) -> list[dict[str, object]]:
+    candidates: list[tuple[int, list[dict[str, object]]]] = []
+    for table in tables:
+        if not isinstance(table, list) or len(table) < 2 or not isinstance(table[0], list):
+            continue
+        header = [_label(value) for value in table[0]]
+        if not {"location", "status description"}.issubset(header):
+            continue
+        has_separate_time = "date" in header and "time" in header
+        has_combined_time = "date / time" in header
+        if not has_separate_time and not has_combined_time:
+            continue
+
+        location_index = header.index("location")
+        status_index = header.index("status description")
         mode_index = header.index("mode") if "mode" in header else None
         events = []
         for row in table[1:]:
             if not isinstance(row, list):
                 continue
-            time_value = _join_values(_at(row, indexes["date"]), _at(row, indexes["time"]))
+            if has_separate_time:
+                time_value = _join_values(_at(row, header.index("date")), _at(row, header.index("time")))
+            else:
+                time_value = _at(row, header.index("date / time"))
+            status = _at(row, status_index)
+            location = _at(row, location_index)
+            if not (time_value or status or location):
+                continue
+            raw_mode = _at(row, mode_index) if mode_index is not None else None
+            vessel, voyage = _split_vessel_voyage(raw_mode)
             events.append(
                 {
                     "time": time_value,
-                    "status": _at(row, indexes["status description"]),
-                    "location": _at(row, indexes["location"]),
-                    "mode": _at(row, mode_index) if mode_index is not None else None,
-                    "vessel": None,
-                    "voyage": None,
+                    "status": status,
+                    "location": location,
+                    "mode": "Vessel" if vessel else raw_mode,
+                    "vessel": vessel,
+                    "voyage": voyage,
                 }
             )
-        _apply_events(result, events)
-        break
-    return result
+        if events:
+            candidates.append((1 if has_separate_time else 0, events))
+
+    if not candidates:
+        return []
+    _, events = max(candidates, key=lambda candidate: (candidate[0], len(candidate[1])))
+    return sorted(events, key=lambda event: str(event.get("time") or ""), reverse=True)
+
+
+def _hmm_vessels(tables: list[object]) -> list[tuple[str | None, str | None]]:
+    for table in tables:
+        if not isinstance(table, list) or len(table) < 2 or not isinstance(table[0], list):
+            continue
+        header = [_label(value) for value in table[0]]
+        if "vessel / voyage" not in header:
+            continue
+        index = header.index("vessel / voyage")
+        vessels = []
+        for row in table[1:]:
+            if not isinstance(row, list):
+                continue
+            vessel, voyage = _split_vessel_voyage(_at(row, index))
+            if vessel or voyage:
+                vessels.append((vessel, voyage))
+        return vessels
+    return []
 
 
 def _normalize_cosco(result: dict[str, object], raw: Mapping[str, Any]) -> dict[str, object]:
@@ -286,6 +375,10 @@ def _text(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _label(value: object) -> str:
+    return " ".join(str(value).strip().lower().split())
 
 
 _NORMALIZERS: Mapping[Carrier, Callable[[dict[str, object], Mapping[str, Any]], dict[str, object]]] = {

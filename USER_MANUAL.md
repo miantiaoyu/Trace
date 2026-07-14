@@ -170,6 +170,10 @@ python -m crawler_lab.hmm_probe --container HMMU4706485
 
 当前 HMM 在无头浏览器模式下无法稳定访问，脚本会拒绝 `--headless`。服务器需要运行在 Windows 桌面会话，或 Linux 的 Xvfb 虚拟显示器中；不需要人工点击或登录。
 
+HMM 的 `normalized` 会提取始发地、目的地、目的地 ETA、船名、航次和轨迹事件。事件表 `Mode` 列如果是船名航次，例如 `GSL CHLOE 2610N`，会转换为 `mode=Vessel`、`vessel=GSL CHLOE`、`voyage=2610N`。
+
+HMM 的 `raw.parse_diagnostics` 会列出页面表格数量、表头，以及是否识别到航线、柜摘要、船舶航段和事件区块。柜摘要契约缺失时查询会明确失败，避免官网改版后静默输出空结果。
+
 ### 万海官网查询
 
 万海当前可用的是官网旧站路径，不直接抓 `cec/#/cargotracking`：

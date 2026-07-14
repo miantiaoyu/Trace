@@ -46,6 +46,60 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(result["events"][0]["status"], "Export Truck Gate In")
         self.assertEqual(result["events"][0]["time"], "2026-07-13 16:52")
 
+    def test_normalizes_hmm_route_vessel_eta_and_vessel_events(self) -> None:
+        raw = {
+            "tables": [
+                [
+                    ["", "Origin", "Loading Port", "T/S Port", "Discharging Port", "Destination"],
+                    ["Location", "XIAMEN, CHINA", "XIAMEN, CHINA", "BUSAN, KOREA", "SAVANNAH, GA", "SAVANNAH, GA"],
+                    ["Terminal", "XIAMEN TERMINAL", "XIAMEN TERMINAL", "BUSAN TERMINAL", "GARDEN CITY", "GARDEN CITY"],
+                    ["Arrival(ETB)", "", "2026-06-19 07:23", "2026-07-05 13:18", "2026-08-16 00:30", "2026-08-16 12:27"],
+                ],
+                [
+                    ["Vessel / Voyage", "Route", "Loading Port", "Departure", "Discharging Port", "Arrival"],
+                    ["GSL CHLOE 2610N", "PF1", "XIAMEN, CHINA", "2026-06-27 20:14", "BUSAN, KOREA", "2026-07-05 13:18"],
+                    ["HYUNDAI MARS 0055E", "EC1", "BUSAN, KOREA", "2026-07-16 23:00", "SAVANNAH, GA", "2026-08-16 00:30"],
+                ],
+                [
+                    ["Date", "Time", "Location", "Status Description", "Mode"],
+                    ["2026-07-05", "22:56", "BUSAN, KOREA", "Vessel Discharged at T/S Port", "GSL CHLOE 2610N"],
+                    ["2026-06-19", "07:23", "XIAMEN, CHINA", "Export Truck Gate In", "Truck"],
+                ],
+            ]
+        }
+
+        result = normalize_tracking(Carrier.HMM, "HMMU0000001", raw)
+
+        self.assertEqual(result["origin"], "XIAMEN, CHINA - XIAMEN TERMINAL")
+        self.assertEqual(result["destination"], "SAVANNAH, GA - GARDEN CITY")
+        self.assertEqual(result["destination_eta"], "2026-08-16 12:27")
+        self.assertEqual(result["events"][0]["mode"], "Vessel")
+        self.assertEqual(result["events"][0]["vessel"], "GSL CHLOE")
+        self.assertEqual(result["events"][0]["voyage"], "2610N")
+        self.assertEqual(result["vessel"]["name"], "GSL CHLOE")
+        self.assertTrue(result["coverage"]["vessel"])
+        self.assertTrue(result["coverage"]["eta"])
+
+    def test_normalizes_hmm_combined_datetime_as_event_fallback(self) -> None:
+        raw = {
+            "tables": [
+                [
+                    ["Location", "Date / Time", "Status Description"],
+                    ["QINGDAO, CHINA", "2026-07-11 04:11", "Export Empty Container Released"],
+                ],
+                [
+                    ["Vessel / Voyage", "Route"],
+                    ["HMM JUNIPER 0004W", "FIL"],
+                ],
+            ]
+        }
+
+        result = normalize_tracking(Carrier.HMM, "HMMU0000002", raw)
+
+        self.assertEqual(result["current"]["time"], "2026-07-11 04:11")
+        self.assertEqual(result["vessel"]["name"], "HMM JUNIPER")
+        self.assertEqual(result["vessel"]["voyage"], "0004W")
+
     def test_normalizes_cosco_rows(self) -> None:
         raw = {
             "rows": [
