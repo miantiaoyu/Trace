@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from html.parser import HTMLParser
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from crawler_lab.html_tables import extract_table_rows
 
 
 TRACKING_URL = "https://www.evergreen-shipping.cn/servlet/TDB1_CargoTracking.do"
@@ -16,35 +17,6 @@ REQUIRED_HEADERS = ("箱号", "货柜动态", "地点")
 
 class TrackingPageError(RuntimeError):
     pass
-
-
-class TableRowsParser(HTMLParser):
-    """Collect table rows without relying on the page's visual layout."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.rows: list[list[str]] = []
-        self._row_stack: list[list[str]] = []
-        self._cell_stack: list[list[str]] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "tr":
-            self._row_stack.append([])
-        elif tag in {"td", "th"} and self._row_stack:
-            self._cell_stack.append([])
-
-    def handle_data(self, data: str) -> None:
-        if self._cell_stack:
-            self._cell_stack[-1].append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"td", "th"} and self._cell_stack and self._row_stack:
-            value = " ".join("".join(self._cell_stack.pop()).split())
-            self._row_stack[-1].append(value)
-        elif tag == "tr" and self._row_stack:
-            row = self._row_stack.pop()
-            if row:
-                self.rows.append(row)
 
 
 def fetch_tracking(container: str) -> dict[str, object]:
@@ -80,9 +52,7 @@ def fetch_tracking(container: str) -> dict[str, object]:
     except URLError as exc:
         raise TrackingPageError(f"无法连接长荣查询页面: {exc.reason}") from exc
 
-    parser = TableRowsParser()
-    parser.feed(html)
-    return _extract_tracking_rows(parser.rows, normalized_container)
+    return _extract_tracking_rows(extract_table_rows(html), normalized_container)
 
 
 def _extract_tracking_rows(rows: list[list[str]], container: str) -> dict[str, object]:

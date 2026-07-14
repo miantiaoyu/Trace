@@ -8,6 +8,7 @@ from pathlib import Path
 from trace_api_probe.carriers import Carrier, parse_carrier
 from trace_api_probe.config import read_db_config
 from trace_api_probe.db import ShipmentSample, fetch_recent_shipments
+from trace_api_probe.runtime import RunLock, RunRecorder
 from trace_api_probe.tracking import TrackingOptions, query_samples
 
 
@@ -33,30 +34,44 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--timeout-seconds", type=_positive_float, help="覆盖船司默认查询超时，单位秒")
     parser.add_argument("--max-attempts", type=_positive_int, help="覆盖船司默认最大尝试次数")
     parser.add_argument("--min-interval-seconds", type=_nonnegative_float, help="覆盖船司默认最小访问间隔，单位秒")
+    parser.add_argument("--lock-file", default=".trace-api-probe.lock", help="防止定时任务重叠的锁文件路径")
+    parser.add_argument("--lock-timeout-seconds", type=_nonnegative_float, default=0, help="等待任务锁的秒数，默认立即失败")
+    parser.add_argument("--run-log", help="可选的脱敏 JSONL 运行日志路径")
+    parser.add_argument("--health-state", help="可选的船司连续失败状态文件路径")
+    parser.add_argument("--alert-threshold", type=_positive_int, default=3, help="连续多少轮无成功结果后告警，默认 3")
     args = parser.parse_args(argv)
 
     try:
-        carrier = parse_carrier(args.carrier) if args.carrier else None
-        samples = _resolve_samples(
-            carrier=carrier,
-            container_no=args.container,
-            config_path=Path(args.db_config),
-            days=args.days,
-            limit=args.limit,
-        )
-        report = _build_report(
-            samples=samples,
-            days=args.days,
-            limit=args.limit,
-            carrier=carrier,
-            options=TrackingOptions(
-                headless=args.headless,
-                browser_channel=args.browser_channel,
-                timeout_seconds=args.timeout_seconds,
-                max_attempts=args.max_attempts,
-                min_interval_seconds=args.min_interval_seconds,
-            ),
-        )
+        with RunLock(Path(args.lock_file), timeout_seconds=args.lock_timeout_seconds):
+            carrier = parse_carrier(args.carrier) if args.carrier else None
+            samples = _resolve_samples(
+                carrier=carrier,
+                container_no=args.container,
+                config_path=Path(args.db_config),
+                days=args.days,
+                limit=args.limit,
+            )
+            report = _build_report(
+                samples=samples,
+                days=args.days,
+                limit=args.limit,
+                carrier=carrier,
+                options=TrackingOptions(
+                    headless=args.headless,
+                    browser_channel=args.browser_channel,
+                    timeout_seconds=args.timeout_seconds,
+                    max_attempts=args.max_attempts,
+                    min_interval_seconds=args.min_interval_seconds,
+                ),
+            )
+            recorder = RunRecorder(
+                log_path=Path(args.run_log) if args.run_log else None,
+                health_state_path=Path(args.health_state) if args.health_state else None,
+                alert_threshold=args.alert_threshold,
+            )
+            report["alerts"] = recorder.record(report)
+            for alert in report["alerts"]:
+                print(f"告警：{alert['message']}", file=sys.stderr)
         _print_json(report)
         return 0 if report["summary"]["failed"] == 0 and report["summary"]["partial"] == 0 else 1
     except Exception as exc:

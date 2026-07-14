@@ -1,2 +1,5 @@
 PyMySQL>=1.1.1,<2
 playwright>=1.61,<2
+pydantic>=2.13,<3
+selectolax>=0.4.5,<1
+filelock>=3.20,<4

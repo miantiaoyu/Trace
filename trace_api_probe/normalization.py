@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Callable, Mapping
 
 from trace_api_probe.carriers import Carrier
+from trace_api_probe.models import new_tracking_summary, validate_tracking_summary
 
 
 def normalize_tracking(carrier: Carrier, container: str, raw: object) -> dict[str, object]:
@@ -13,29 +14,11 @@ def normalize_tracking(carrier: Carrier, container: str, raw: object) -> dict[st
     normalizer = _NORMALIZERS.get(carrier)
     if normalizer is None or not isinstance(raw, Mapping):
         return result
-    return normalizer(result, raw)
+    return validate_tracking_summary(normalizer(result, raw))
 
 
 def empty_tracking_summary(carrier: Carrier, container: str) -> dict[str, object]:
-    return {
-        "schema_version": "1.1",
-        "carrier": carrier.value,
-        "container": container,
-        "current": {"time": None, "status": None, "location": None, "mode": None},
-        "next_expected": {"time": None, "status": None, "location": None, "mode": None},
-        "vessel": {"name": None, "voyage": None, "imo": None},
-        "origin": None,
-        "destination": None,
-        "destination_eta": None,
-        "events": [],
-        "coverage": {
-            "current": False,
-            "next_expected": False,
-            "events": False,
-            "vessel": False,
-            "eta": False,
-        },
-    }
+    return new_tracking_summary(carrier.value, container)
 
 
 def _normalize_yang_ming(result: dict[str, object], raw: Mapping[str, Any]) -> dict[str, object]:

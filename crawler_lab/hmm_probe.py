@@ -4,7 +4,8 @@ import argparse
 import json
 import os
 import sys
-from html.parser import HTMLParser
+
+from crawler_lab.html_tables import extract_tables
 
 
 TRACKING_PAGE_URL = "https://www.hmm21.com/e-service/general/trackNTrace/TrackNTrace.do"
@@ -15,42 +16,6 @@ SEARCH_BUTTON_SELECTOR = 'button[onclick="search()"]'
 
 class HmmTrackingError(RuntimeError):
     pass
-
-
-class ResultTablesParser(HTMLParser):
-    """Extract tables from HMM's official HTML fragment without visual scraping."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.tables: list[list[list[str]]] = []
-        self._table_stack: list[list[list[str]]] = []
-        self._row_stack: list[list[str]] = []
-        self._cell_stack: list[list[str]] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "table":
-            self._table_stack.append([])
-        elif tag == "tr" and self._table_stack:
-            self._row_stack.append([])
-        elif tag in {"td", "th"} and self._row_stack:
-            self._cell_stack.append([])
-
-    def handle_data(self, data: str) -> None:
-        if self._cell_stack:
-            self._cell_stack[-1].append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"td", "th"} and self._cell_stack and self._row_stack:
-            value = " ".join("".join(self._cell_stack.pop()).split())
-            self._row_stack[-1].append(value)
-        elif tag == "tr" and self._row_stack and self._table_stack:
-            row = self._row_stack.pop()
-            if row:
-                self._table_stack[-1].append(row)
-        elif tag == "table" and self._table_stack:
-            table = self._table_stack.pop()
-            if table:
-                self.tables.append(table)
 
 
 def fetch_tracking(
@@ -115,9 +80,8 @@ def _build_result(raw_html: str, container: str) -> dict[str, object]:
     if "SHIPMENT PROGRESS" not in normalized_html:
         raise HmmTrackingError("HMM 追踪响应缺少 Shipment Progress，无法确认轨迹数据")
 
-    parser = ResultTablesParser()
-    parser.feed(raw_html)
-    table_headers = [table[0] for table in parser.tables if table]
+    tables = extract_tables(raw_html)
+    table_headers = [table[0] for table in tables if table]
     sections = {
         "route": _has_headers(table_headers, {"origin", "destination"}),
         "container_summary": _has_headers(table_headers, {"container no.", "movement"}),
@@ -131,9 +95,9 @@ def _build_result(raw_html: str, container: str) -> dict[str, object]:
         "container": container,
         "query_url": TRACKING_PAGE_URL,
         "result_endpoint": TRACKING_RESPONSE_PATH,
-        "tables": parser.tables,
+        "tables": tables,
         "parse_diagnostics": {
-            "table_count": len(parser.tables),
+            "table_count": len(tables),
             "table_headers": table_headers,
             "sections": sections,
         },

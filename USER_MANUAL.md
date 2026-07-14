@@ -35,10 +35,16 @@ python -m trace_api_probe
 python -m trace_api_probe --carrier YML --days 7 --limit 1
 ```
 
-使用无界面浏览器运行 MSC、万海等网页路线：
+使用无界面浏览器运行支持无头模式的网页路线，例如 MSC：
 
 ```bash
 python -m trace_api_probe --carrier MSC --headless --limit 1
+```
+
+万海当前需要有界浏览器。在 Linux 无桌面服务器上与 HMM 一样通过 Xvfb 运行：
+
+```bash
+xvfb-run -a python -m trace_api_probe --carrier WAN_HAI --days 7 --limit 1
 ```
 
 HMM 必须使用有界浏览器，不要传 `--headless`：
@@ -66,6 +72,23 @@ python -m trace_api_probe --carrier YML --container YMMU7349033
 ```bash
 python -m trace_api_probe --timeout-seconds 90 --max-attempts 2 --min-interval-seconds 5
 ```
+
+统一摘要使用 Pydantic schema `1.1` 做严格校验。命令行输出仍是普通 JSON，调用方接口不需要依赖 Pydantic；契约不匹配会被隔离为当前柜号的 `partial_success`，并保留已经取得的 `raw`。
+
+## 定时任务保护与运行观测
+
+统一入口默认创建 `.trace-api-probe.lock` 任务锁。上一轮仍在运行时，新一轮会立即以明确错误退出，避免两个批次同时访问官网。可用 `--lock-timeout-seconds` 设置等待时间，或用 `--lock-file` 指定服务器上的固定锁路径。
+
+以下命令额外写入脱敏 JSONL 指标和船司健康状态：
+
+```bash
+python -m trace_api_probe --days 7 --limit 20 \
+  --run-log var/trace-runs.jsonl \
+  --health-state var/trace-health.json \
+  --alert-threshold 3
+```
+
+运行日志只记录查询范围、成功/失败数量、尝试次数、重试次数和耗时，不记录柜号、原始响应或数据库连接信息。某船司连续达到 3 轮没有成功结果时，报告的 `alerts` 字段和标准错误会输出告警。默认不传 `--run-log` 与 `--health-state` 时不写这些文件。
 
 输出报告包含 `query`、`summary` 和 `results`。`summary` 分别统计 `success`、`partial` 和 `failed`。每条 `results` 记录包含数据库样本信息、归一化船司、路线、执行次数、状态、`normalized` 统一摘要和 `raw` 原始返回；网页受限、超时或解析异常只影响当前柜号，不会让其他记录消失。
 
@@ -112,7 +135,7 @@ coverage: 当前来源实际提供了哪些字段
 | 万海 | 8 秒 | 120 秒 | 1 |
 | HMM | 12 秒 | 90 秒 | 2 |
 
-只有可恢复错误才重试，包括硬超时、连接中断、浏览器访问失败、HTTP 429 和 HTTP 5xx。柜号无数据、页面契约变化、参数错误、验证码或访问拒绝不会重试。重试前仍遵守同船司最小访问间隔，没有无限重试。
+只有可恢复错误才重试，包括硬超时、连接中断、浏览器访问失败、HTTP 429 和 HTTP 5xx。柜号无数据、页面契约变化、参数错误、验证码或访问拒绝不会重试。重试等待采用指数退避并加入最多 1 秒随机抖动，同时取同船司剩余限速时间与退避时间的较大值；默认退避从 2 秒开始，最大 30 秒，没有无限重试。实际等待时长记录在 `execution.retry_delays_seconds`。
 
 ## 常见问题
 
@@ -126,7 +149,7 @@ coverage: 当前来源实际提供了哪些字段
 
 ### 会保存返回文件吗？
 
-不会，只在控制台输出 JSON 报告。
+默认不会，只在控制台输出 JSON 报告。显式传入 `--run-log` 或 `--health-state` 时只保存脱敏运行指标和连续失败计数，不保存柜号或官网原始返回。
 
 ## 爬虫实验
 

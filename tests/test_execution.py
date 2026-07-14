@@ -105,6 +105,41 @@ class QueryExecutorTests(unittest.TestCase):
         self.assertEqual(raised.exception.query_attempts, 2)
         self.assertEqual(raised.exception.query_elapsed_seconds, 4)
 
+    def test_retry_uses_exponential_backoff_jitter_and_rate_limit(self) -> None:
+        attempts = []
+        now = [0.0]
+        sleeps = []
+
+        def runner(carrier, adapter, container, options, timeout_seconds):
+            attempts.append(container)
+            if len(attempts) < 3:
+                raise RuntimeError("连接失败")
+            return {"container": container}
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        executor = QueryExecutor(
+            runner=runner,
+            clock=lambda: now[0],
+            sleep=sleep,
+            random_value=lambda: 0.5,
+        )
+        policy = QueryPolicy(
+            min_interval_seconds=3,
+            timeout_seconds=10,
+            max_attempts=3,
+            backoff_base_seconds=2,
+            backoff_max_seconds=10,
+            jitter_seconds=2,
+        )
+
+        _, metadata = executor.execute("HMM", lambda container, options: None, "HMMU0000001", object(), policy)
+
+        self.assertEqual(sleeps, [3, 5])
+        self.assertEqual(metadata["retry_delays_seconds"], [3, 5])
+
 
 if __name__ == "__main__":
     unittest.main()

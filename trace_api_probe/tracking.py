@@ -182,6 +182,7 @@ class TrackingRouter:
                     "attempts": getattr(exc, "query_attempts", 1),
                     "timeout_seconds": policy.timeout_seconds,
                     "elapsed_seconds": getattr(exc, "query_elapsed_seconds", None),
+                    "retry_delays_seconds": getattr(exc, "query_retry_delays_seconds", []),
                 },
                 error={"type": type(exc).__name__, "message": str(exc)},
             )
@@ -252,6 +253,9 @@ def _effective_policy(policy: QueryPolicy, options: TrackingOptions) -> QueryPol
         ),
         timeout_seconds=options.timeout_seconds if options.timeout_seconds is not None else policy.timeout_seconds,
         max_attempts=options.max_attempts if options.max_attempts is not None else policy.max_attempts,
+        backoff_base_seconds=policy.backoff_base_seconds,
+        backoff_max_seconds=policy.backoff_max_seconds,
+        jitter_seconds=policy.jitter_seconds,
     )
 
 

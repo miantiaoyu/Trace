@@ -3,11 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from html.parser import HTMLParser
 import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from crawler_lab.html_tables import extract_table_rows
 
 
 TRACKING_ENTRY_URL = "https://www.wanhai.com/views/cargoTrack/CargoTrack.xhtml?file_num=65580"
@@ -35,33 +36,6 @@ class WanHaiTrackingError(RuntimeError):
     pass
 
 
-class TableRowsParser(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.rows: list[list[str]] = []
-        self._row_stack: list[list[str]] = []
-        self._cell_stack: list[list[str]] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "tr":
-            self._row_stack.append([])
-        elif tag in {"td", "th"} and self._row_stack:
-            self._cell_stack.append([])
-
-    def handle_data(self, data: str) -> None:
-        if self._cell_stack:
-            self._cell_stack[-1].append(data)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in {"td", "th"} and self._cell_stack and self._row_stack:
-            value = " ".join("".join(self._cell_stack.pop()).split())
-            self._row_stack[-1].append(value)
-        elif tag == "tr" and self._row_stack:
-            row = self._row_stack.pop()
-            if row:
-                self.rows.append(row)
-
-
 def fetch_tracking(
     container: str,
     *,
@@ -83,9 +57,7 @@ def fetch_tracking(
         query_value=normalized_container,
     )
 
-    parser = TableRowsParser()
-    parser.feed(html)
-    result = _extract_tracking_rows(parser.rows, normalized_container)
+    result = _extract_tracking_rows(extract_table_rows(html), normalized_container)
     result["query_url"] = TRACKING_FORM_URL
     result["result_url"] = result_url
 
@@ -98,9 +70,7 @@ def fetch_tracking(
             cargo_type="2",
             query_value=reference,
         )
-        summary_parser = TableRowsParser()
-        summary_parser.feed(summary_html)
-        result["booking_summary"] = _extract_booking_summary_rows(summary_parser.rows, reference)
+        result["booking_summary"] = _extract_booking_summary_rows(extract_table_rows(summary_html), reference)
         result["booking_summary_url"] = summary_url
 
     return result

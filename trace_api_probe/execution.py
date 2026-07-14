@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import subprocess
 import sys
 import time
@@ -17,6 +18,9 @@ class QueryPolicy:
     min_interval_seconds: float = 3.0
     timeout_seconds: float = 75.0
     max_attempts: int = 2
+    backoff_base_seconds: float = 2.0
+    backoff_max_seconds: float = 30.0
+    jitter_seconds: float = 1.0
 
     def __post_init__(self) -> None:
         if self.min_interval_seconds < 0:
@@ -25,6 +29,8 @@ class QueryPolicy:
             raise ValueError("查询超时必须大于 0")
         if self.max_attempts <= 0:
             raise ValueError("最大尝试次数必须大于 0")
+        if self.backoff_base_seconds < 0 or self.backoff_max_seconds < 0 or self.jitter_seconds < 0:
+            raise ValueError("退避和抖动参数不能小于 0")
 
 
 QueryRunner = Callable[[str, Callable[[str, object], object], str, object, float], object]
@@ -40,10 +46,12 @@ class QueryExecutor:
         use_subprocess: bool = True,
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
+        random_value: Callable[[], float] = random.random,
     ) -> None:
         self._runner = runner or (_run_with_subprocess_timeout if use_subprocess else _run_direct)
         self._clock = clock
         self._sleep = sleep
+        self._random_value = random_value
         self._last_started_at: dict[str, float] = {}
 
     def execute(
@@ -55,6 +63,7 @@ class QueryExecutor:
         policy: QueryPolicy,
     ) -> tuple[object, dict[str, object]]:
         attempts = 0
+        retry_delays: list[float] = []
         started_at = self._clock()
         for attempt in range(1, policy.max_attempts + 1):
             attempts = attempt
@@ -72,15 +81,18 @@ class QueryExecutor:
                     "attempts": attempts,
                     "timeout_seconds": policy.timeout_seconds,
                     "elapsed_seconds": round(self._clock() - started_at, 3),
+                    "retry_delays_seconds": retry_delays,
                 }
             except QueryTimeoutError as exc:
                 if attempt == policy.max_attempts:
-                    _attach_failure_metadata(exc, attempts, self._clock() - started_at)
+                    _attach_failure_metadata(exc, attempts, self._clock() - started_at, retry_delays)
                     raise
+                retry_delays.append(self._wait_before_retry(carrier, attempt, policy))
             except Exception as exc:
                 if not _is_transient_error(exc) or attempt == policy.max_attempts:
-                    _attach_failure_metadata(exc, attempts, self._clock() - started_at)
+                    _attach_failure_metadata(exc, attempts, self._clock() - started_at, retry_delays)
                     raise
+                retry_delays.append(self._wait_before_retry(carrier, attempt, policy))
 
         raise AssertionError("查询尝试流程不应到达这里")
 
@@ -91,6 +103,18 @@ class QueryExecutor:
         remaining = interval - (self._clock() - last_started_at)
         if remaining > 0:
             self._sleep(remaining)
+
+    def _wait_before_retry(self, carrier: str, attempt: int, policy: QueryPolicy) -> float:
+        backoff = min(policy.backoff_base_seconds * (2 ** (attempt - 1)), policy.backoff_max_seconds)
+        jitter = self._random_value() * policy.jitter_seconds
+        last_started_at = self._last_started_at.get(carrier)
+        interval_remaining = 0.0
+        if last_started_at is not None:
+            interval_remaining = max(0.0, policy.min_interval_seconds - (self._clock() - last_started_at))
+        delay = max(interval_remaining, backoff + jitter)
+        if delay > 0:
+            self._sleep(delay)
+        return round(delay, 3)
 
 
 def _run_with_subprocess_timeout(
@@ -173,11 +197,17 @@ def _is_transient_error(exc: Exception) -> bool:
     )
 
 
-def _attach_failure_metadata(exc: BaseException | None, attempts: int, elapsed_seconds: float) -> None:
+def _attach_failure_metadata(
+    exc: BaseException | None,
+    attempts: int,
+    elapsed_seconds: float,
+    retry_delays: list[float],
+) -> None:
     if exc is None:
         return
     try:
         setattr(exc, "query_attempts", attempts)
         setattr(exc, "query_elapsed_seconds", round(elapsed_seconds, 3))
+        setattr(exc, "query_retry_delays_seconds", retry_delays)
     except Exception:
         return
