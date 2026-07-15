@@ -1,0 +1,46 @@
+services:
+  trace:
+    build:
+      context: .
+    image: trace-api-probe:local
+    user: "10001:10001"
+    init: true
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m
+      - /home/trace/.cache:rw,noexec,nosuid,size=128m,mode=700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2.0
+    secrets:
+      - source: prod_db
+        target: prod-db.yml
+    volumes:
+      - trace_state:/var/lib/trace
+    command:
+      - --db-config
+      - /run/secrets/prod-db.yml
+      - --days
+      - "7"
+      - --limit
+      - "20"
+      - --lock-file
+      - /var/lib/trace/.trace-api-probe.lock
+      - --run-log
+      - /var/lib/trace/trace-runs.jsonl
+      - --health-state
+      - /var/lib/trace/trace-health.json
+      - --alert-threshold
+      - "3"
+
+secrets:
+  prod_db:
+    file: ./prod-db.yml
+
+volumes:
+  trace_state:

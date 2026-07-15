@@ -59,6 +59,29 @@ Linux 服务器没有图形桌面时，通过 Xvfb 提供虚拟显示器：
 xvfb-run -a python -m trace_api_probe --carrier HMM --days 7 --limit 1
 ```
 
+## Docker 安全部署
+
+项目提供了包含 Python、Playwright Chromium、Xvfb 和系统字体的镜像。它是一次性批处理容器，不是 HTTP 服务，不需要开放端口。镜像默认通过 Xvfb 启动，因此 HMM 和万海的有界浏览器路线可以直接运行。
+
+在服务器上准备 Docker Engine 和 Compose plugin 后，将本仓库与未提交的 `prod-db.yml` 放在同一目录，执行：
+
+```bash
+docker compose build
+docker compose run --rm trace
+```
+
+`prod-db.yml` 只作为 Compose secret 以只读方式挂载到容器，不会复制进镜像。容器默认使用非 root 用户、只读根文件系统、独立临时文件系统、禁止提权、丢弃 Linux capabilities，并限制 1 GiB 内存和 256 个进程。脱敏运行日志、连续失败状态和任务锁保存在 Docker volume `trace_state` 中；不需要状态时可以用 `docker compose down -v` 清理。
+
+默认命令查询最近 7 天最多 20 个柜号。临时联调可以覆盖参数，例如：
+
+```bash
+docker compose run --rm trace --carrier HMM --limit 1
+docker compose run --rm trace --carrier MSC --headless --limit 1
+docker compose run --rm trace --container HMMU4706485 --carrier HMM
+```
+
+生产环境建议使用宿主机 systemd timer 或受控的 CI 定时触发 `docker compose run --rm trace`，并限制服务器出站访问范围；不要把 `prod-db.yml` 写入镜像、提交 Git 或放进公开日志。该容器没有 Web API，若需要浏览器界面或远程调用，应另行设计鉴权层，不要直接把 CLI 暴露到公网。
+
 手动指定柜号进行单条联调，不读取数据库：
 
 ```bash

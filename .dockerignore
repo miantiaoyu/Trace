@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+tests
+prod-db.yml
+var
+trace-runs.jsonl
+trace-health.json
+.trace-api-probe.lock
