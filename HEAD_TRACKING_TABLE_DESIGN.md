@@ -4,7 +4,7 @@
 
 ## 设计目标
 
-- 以 ERP 中的一条来源记录为一个追踪对象，而不是只以柜号作为主键。
+- 以 ERP 人工生成且不重复的拼柜号（`PG+日期...`）为一个追踪对象，同一拼柜号下多个订单只查询一次。
 - 保存船司本次成功查询得到的最新原始 JSON。
 - 将业务最关心的字段提升为可直接筛选、排序和统计的列。
 - 能区分新订单、尚未到达最终目的地的待追踪记录和已完成记录。
@@ -12,18 +12,18 @@
 
 ## 记录粒度和身份
 
-建议一行代表一条 ERP 来源记录的“当前追踪快照”。当前代码从 `trobs.po_cabinet_combination` 使用的来源字段是：
+建议一行代表一个拼柜号的“当前追踪快照”。当前代码从 `trobs.po_cabinet_combination` 只读取了以下字段；实现前还需要补充 ERP 拼柜号的真实字段名：
 
 | 业务含义 | 来源字段 | 目标字段建议 |
 | --- | --- | --- |
-| ERP 记录身份 | `id` | `erp_record_id` |
+| 拼柜号 | 待确认真实列名 | `consolidation_no` |
 | 船司原始值 | `shipping_company` | `erp_shipping_company` |
 | 规范化船司 | 查询归一化结果 | `carrier_code` |
 | 柜号 | `cabinet_no` | `container_no` |
 | ERP 更新时间 | `update_time` | `erp_update_time` |
 | ERP 创建时间 | `create_time` | `erp_create_time` |
 
-建议唯一约束使用 `(environment, erp_record_id, container_no)`。柜号可能被后续运输重复使用，不能把 `container_no` 单独作为唯一业务键。若 ERP 中存在比当前 `id` 更稳定的订单/订舱主键，应优先替换 `erp_record_id`。
+建议唯一约束使用 `(environment, consolidation_no)`。同一拼柜号下的 ERP 行必须具有一致的柜号和船司；如果出现一个拼柜号对应多个柜号或多个船司，应作为 ERP 数据异常隔离，不能任意选择一条查询。
 
 ## 建议字段
 
@@ -33,7 +33,8 @@
 | --- | --- | --- |
 | `id` | BIGINT 主键 | 头程追踪表自身主键 |
 | `environment` | VARCHAR | `test` 或 `prod`，防止环境数据混用 |
-| `erp_record_id` | BIGINT | ERP 来源记录 ID |
+| `consolidation_no` | VARCHAR | 拼柜号，头程记录的业务唯一标识 |
+| `erp_order_count` | INT | 当前拼柜号关联的 ERP 订单/来源记录数量 |
 | `erp_shipping_company` | VARCHAR | ERP 原始船司值，便于回溯 |
 | `carrier_code` | VARCHAR | 统一船司代码，例如 `HMM`、`MAERSK` |
 | `container_no` | VARCHAR | 清理空白并大写后的柜号 |
@@ -44,11 +45,10 @@
 
 | 字段 | 类型方向 | 说明 |
 | --- | --- | --- |
-| `departure_time` | DATETIME | 出发时间；优先保存明确的实际出发事件 |
-| `departure_time_type` | VARCHAR | `ACTUAL`、`EXPECTED` 或空；不能把预计时间伪装成实际时间 |
-| `origin_location` | VARCHAR | 起始地点/起运港 |
-| `destination_location` | VARCHAR | 最终目的地/目的港 |
-| `destination_eta` | DATETIME | 最终目的地预计到达时间 |
+| `departure_time` | DATETIME | 实际出发时间；没有实际事件时保持为空，不保存预计出发时间 |
+| `origin_port` | VARCHAR | 头程起运港 |
+| `destination_port` | VARCHAR | 头程最终卸船港，不是转运港或交付仓库 |
+| `destination_eta` | DATETIME | 最终卸船港预计到达时间 |
 | `current_event_time` | DATETIME | 当前状态对应的事件时间 |
 | `current_status` | VARCHAR | 当前运输状态 |
 | `current_location` | VARCHAR | 当前地点、码头或场站 |
@@ -56,11 +56,11 @@
 | `vessel_name` | VARCHAR | 当前或下一相关船名 |
 | `voyage` | VARCHAR | 当前或下一相关航次 |
 | `imo` | VARCHAR | IMO 船舶编号，来源没有时为空 |
-| `is_arrived_destination` | TINYINT(1) | 是否已明确到达最终目的地，核心筛选字段 |
-| `destination_arrived_at` | DATETIME | 明确到达/提柜/还空箱等实际事件时间 |
+| `is_arrived_destination` | TINYINT(1) | 是否已在最终卸船港实际卸船，核心筛选字段 |
+| `destination_arrived_at` | DATETIME | 最终卸船港实际卸船时间 |
 | `destination_arrival_evidence` | VARCHAR | 判定依据，例如官网状态文本或事件名称 |
 
-`is_arrived_destination` 只有在来源返回明确的实际证据时才置为 `1`，例如目的港卸船、提柜、还空箱或明确交付完成。只有 ETA、目的地字段或预计事件时必须保持 `0`。
+`is_arrived_destination` 只有在来源返回“最终卸船港实际卸船”的明确证据时才置为 `1`。转运港卸船不能置为 `1`；只有 ETA、目的港字段或预计事件时也必须保持 `0`。提柜、仓库交付和还空箱属于卸船后的业务，不是本表完成条件。
 
 ### 查询状态和原始数据
 
@@ -80,13 +80,13 @@
 | `created_at` | DATETIME | 头程记录首次创建时间 |
 | `updated_at` | DATETIME | 头程记录最后更新时间 |
 
-`raw_response_json` 保存最新成功原始返回；`query_failed` 不应清空上一份有效原始数据和业务快照。若需要保留每一次查询的历史原始 JSON，应另建“查询历史表”，不要把一列不断追加成数组。
+`raw_response_json` 只保存最新一次成功原始返回；`query_failed` 不应清空上一份有效原始数据和业务快照。本轮不设计查询历史表。
 
 ## 查询流程
 
 每轮任务建议分两组取数：
 
-1. **新订单**：ERP 来源记录在头程表中不存在。
+1. **新拼柜号**：ERP 按拼柜号聚合后，头程表中不存在该拼柜号。
 2. **未到达待追踪**：头程表已存在，`is_arrived_destination = 0`，并且 `next_query_at` 为空或已到期。
 
 已到达记录默认不再重复查询。任务应允许人工或特殊参数强制重查，但不能让普通定时任务因为 ERP 更新时间变化而无限重复已完成记录。
@@ -95,7 +95,7 @@
 
 ## 索引建议
 
-- 唯一索引：`environment + erp_record_id + container_no`
+- 唯一索引：`environment + consolidation_no`
 - 待追踪索引：`environment + is_arrived_destination + next_query_at`
 - 船司批量索引：`environment + carrier_code + is_arrived_destination`
 - 柜号查询索引：`environment + container_no`
@@ -103,11 +103,8 @@
 
 ## 需要你确认的事项
 
-1. ERP 的 `id` 是否能稳定代表一条订单/柜号业务记录？如果不能，需要提供订单号或订舱号作为业务键。
-2. `departure_time` 是否只接受实际出发时间，还是允许在没有实际事件时暂存预计出发时间？
-3. `raw_response_json` 只保留最新一次，还是需要完整查询历史？完整历史需要第二张表。
-4. `destination_location` 是目的港，还是最终交付地点/仓库？两者可能不同。
-5. 结果表是否和 ERP 同在 `oms` 库，还是放到单独的追踪库/ schema？
-6. 是否允许为结果表创建专用写账号，而不是使用 ERP 查询账号？
+1. ERP 中“拼柜号（PG+日期...）”的真实列名是什么？当前代码尚未读取该列。
+2. 一个拼柜号是否始终只对应一个物理柜号和一个船司？设计会把不一致情况当作数据异常。
+3. 头程表的正式表名是否使用 `trace_first_leg`？
 
-在以上事项确认前，不生成 SQL，也不修改当前只读查询流程。
+结果表确定建在 `oms` 库；出发时间只保存实际值；原始 JSON 只保留最新一次；目的地按最终卸船港定义。以上三个剩余事项确认后再生成 SQL，并实现 ERP 聚合查询、结果 upsert 和测试/正式数据库配置逻辑。
