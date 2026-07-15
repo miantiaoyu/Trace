@@ -96,6 +96,28 @@ class HeadwayTests(unittest.TestCase):
         self.assertIn("oms`.`headway", cursor.calls[0][0])
         self.assertEqual(cursor.calls[0][1][1], "PG20260713001")
 
+    def test_persist_headway_skips_unavailable_routes(self) -> None:
+        cursor = FakeCursor()
+        connection = FakeConnection(cursor)
+        fake_module = types.SimpleNamespace(
+            cursors=types.SimpleNamespace(DictCursor=object),
+            connect=lambda **kwargs: connection,
+        )
+        sample = ShipmentSample(1, "APL 美总", "APLU0000001", None, None, "PG20260713002", 1)
+        result = {"status": "route_unavailable", "carrier": "APL", "route": "apl_unavailable", "error": "APL 当前没有稳定的直接查询路线"}
+
+        with patch.dict(sys.modules, {"pymysql": fake_module}):
+            summary = persist_headway(
+                DbConfig("db.example", 3306, "writer", "secret"),
+                environment="test",
+                samples=[sample],
+                results=[result],
+            )
+
+        self.assertEqual(summary, {"attempted": 0, "persisted": 0, "skipped": 1})
+        self.assertFalse(connection.committed)
+        self.assertEqual(cursor.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

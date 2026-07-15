@@ -11,6 +11,7 @@ from trace_api_probe.db import ShipmentSample
 HEADWAY_TABLE = "`oms`.`headway`"
 SUCCESS_STATUSES = {"success"}
 RAW_SUCCESS_STATUSES = {"success", "partial_success"}
+SKIPPED_STATUSES = {"route_unavailable"}
 
 
 def persist_headway(
@@ -24,7 +25,7 @@ def persist_headway(
     rows = [
         _build_row(environment, sample, result)
         for sample, result in zip(samples, results, strict=False)
-        if sample.consolidation_no
+        if sample.consolidation_no and _should_persist_result(result)
     ]
     if not rows:
         return {"attempted": 0, "persisted": 0, "skipped": len(samples)}
@@ -163,6 +164,10 @@ def _build_row(environment: str, sample: ShipmentSample, result: Mapping[str, ob
         if isinstance(summary.get("coverage"), Mapping)
         else None,
     }
+
+
+def _should_persist_result(result: Mapping[str, object]) -> bool:
+    return str(result.get("status") or "internal_error") not in SKIPPED_STATUSES
 
 
 _PARAMETER_ORDER = (

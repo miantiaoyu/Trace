@@ -97,6 +97,7 @@ def fetch_pending_shipments(
     """返回新拼柜号及尚未在最终卸船港完成的到期记录。"""
     recent_candidates = fetch_recent_shipments(config, days=days, carrier=carrier, limit=0)
     pending_keys = _fetch_due_headway_keys(config, environment)
+    pending_key_set = set(pending_keys)
     historical_candidates = _fetch_shipments_by_consolidation_numbers(config, pending_keys, carrier=carrier)
     candidates = _merge_samples(recent_candidates, historical_candidates)
     states = _fetch_headway_states(config, environment, [sample.consolidation_no for sample in candidates])
@@ -106,6 +107,8 @@ def fetch_pending_shipments(
         state = states.get(key) if key else None
         if state is None:
             pending.append(sample)
+            continue
+        if key not in pending_key_set:
             continue
         if bool(state.get("is_arrived_destination")):
             continue

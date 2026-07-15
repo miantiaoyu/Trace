@@ -16,7 +16,7 @@ fi
 
 exec "${compose[@]}" run --rm --no-deps -T trace \
   --db-config /run/secrets/trace-db.yml \
-  --days 7 \
+  --days "${TRACE_DAYS:-60}" \
   --limit "${TRACE_LIMIT:-0}" \
   --lock-file /var/lib/trace/.trace-api-probe.lock \
   --run-log /var/lib/trace/trace-runs.jsonl \

@@ -65,7 +65,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 
 ## 当前限制
 
-- 命令行默认每次最多查询 20 个去重柜号；传 `--limit 0` 查询最近窗口内的全部柜号，XXL-JOB wrapper 默认使用 `--limit 0`。
+- 命令行默认每次最多查询 20 个去重柜号；传 `--limit 0` 查询最近窗口内的全部柜号。上线 wrapper 默认使用 `--days 60 --limit 0`，ERP 新单只补 `headway` 中不存在的拼柜号，已入表未到达记录按 `next_query_at` 到期重查。
 - 不做可视化；默认不写库，`--persist` 只更新 `oms.headway` 当前快照，不写 ERP 源表；原始 JSON 只保留最新一次。
 - 维运网目前只验证到“识别/跳转链接生成”，未直接返回集装箱轨迹事件。
 - MSC 当前走的是官网标准页面流程，不是公开 API 凭证接入；结果仍受官网页面结构、Cookie 弹窗和低频访问策略影响。
@@ -77,6 +77,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 支持通过 `TRACE_ENV`/`TRACE_DB_CONFIG` 隔离测试与正式数据库配置，兼容简单 key/value 和 Spring `jdbc:mysql://` 数据源格式。
 - 提供 XXL-JOB `SHELL` 任务 wrapper，测试环境可由统一调度平台调用 Docker 批处理，不要求 Python 进程注册为 Java executor。
 - 测试配置模板使用 `oms` 数据库；`--persist` 模式按拼柜号 upsert `oms.headway`，不写 ERP 源表。
+- 未适配船司返回 `route_unavailable` 并保留在本轮报告中，但不写入 `oms.headway`。
 
 ## 最近验证
 

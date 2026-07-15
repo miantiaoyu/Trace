@@ -138,7 +138,7 @@ mysql --host 172.16.48.10 --port 3306 --user root --password oms < sql/headway.s
 TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml \
   docker compose run --rm trace \
   --db-config /run/secrets/trace-db.yml \
-  --days 7 \
+  --days 60 \
   --limit 0 \
   --lock-file /var/lib/trace/.trace-api-probe.lock \
   --run-log /var/lib/trace/trace-runs.jsonl \
@@ -148,7 +148,7 @@ TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml \
   --persist
 ```
 
-写入逻辑按拼柜号 upsert：同一个 `PG+日期...` 只保留一条最新记录；已在最终卸船港实际卸船的记录不会被普通定时任务再次查询。查询失败只更新错误和重试时间，不覆盖上一份有效快照。
+写入逻辑按拼柜号 upsert：同一个 `PG+日期...` 只保留一条最新记录；ERP 新单只从当前时间往前 60 天内补充尚未进入 `headway` 的拼柜号，已进入 `headway` 的未到达记录按 `next_query_at` 到期重查。查询失败只更新错误和重试时间，不覆盖上一份有效快照；没有稳定适配器的 `route_unavailable` 不写入 `headway`。
 
 ### 接入 XXL-JOB
 

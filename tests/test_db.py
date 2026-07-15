@@ -5,7 +5,20 @@ from unittest.mock import patch
 
 from trace_api_probe.carriers import Carrier
 from trace_api_probe.config import DbConfig
-from trace_api_probe.db import _group_samples, fetch_recent_shipments
+from trace_api_probe.db import _group_samples, fetch_pending_shipments, fetch_recent_shipments
+
+
+def _sample(consolidation_no: str) -> types.SimpleNamespace:
+    return types.SimpleNamespace(
+        id=1,
+        shipping_company="HMM",
+        container_no=f"{consolidation_no}U",
+        update_time=None,
+        create_time=None,
+        consolidation_no=consolidation_no,
+        erp_order_count=1,
+        source_error=None,
+    )
 
 
 class FakeCursor:
@@ -127,6 +140,28 @@ class DbTests(unittest.TestCase):
             )
 
         self.assertEqual(result[0].container_no, "EGHU9204414")
+
+    def test_pending_shipments_only_take_recent_rows_missing_from_headway(self) -> None:
+        config = DbConfig("db.example", 3306, "reader", "secret")
+        new_sample = _sample("PG_NEW")
+        existing_recent = _sample("PG_EXISTING_RECENT")
+        due_sample = _sample("PG_DUE")
+
+        with (
+            patch("trace_api_probe.db.fetch_recent_shipments", return_value=[new_sample, existing_recent]),
+            patch("trace_api_probe.db._fetch_due_headway_keys", return_value=["PG_DUE"]),
+            patch("trace_api_probe.db._fetch_shipments_by_consolidation_numbers", return_value=[due_sample]),
+            patch(
+                "trace_api_probe.db._fetch_headway_states",
+                return_value={
+                    "PG_EXISTING_RECENT": {"is_arrived_destination": 0, "next_query_at": None},
+                    "PG_DUE": {"is_arrived_destination": 0, "next_query_at": None},
+                },
+            ),
+        ):
+            result = fetch_pending_shipments(config, environment="test", days=60, limit=0)
+
+        self.assertEqual([item.consolidation_no for item in result], ["PG_NEW", "PG_DUE"])
 
 
 if __name__ == "__main__":
