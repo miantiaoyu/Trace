@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -16,7 +17,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="从只读库读取最近订单并按船司查询柜号轨迹")
     parser.add_argument("--carrier", help="只查询指定船司；不传则查询最近订单中的全部船司")
     parser.add_argument("--container", help="手动指定柜号；必须同时传 --carrier")
-    parser.add_argument("--db-config", default="prod-db.yml", help="只读数据库配置文件路径，默认 prod-db.yml")
+    parser.add_argument(
+        "--environment",
+        choices=("test", "prod"),
+        default=None,
+        help="运行环境，默认读取 TRACE_ENV 或 prod；用于选择 test-db.yml/prod-db.yml",
+    )
+    parser.add_argument("--db-config", help="只读数据库配置文件路径；传入后优先于环境默认路径")
     parser.add_argument("--days", type=_positive_int, default=7, help="查询最近多少天，默认 7")
     parser.add_argument(
         "--limit",
@@ -39,7 +46,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-log", help="可选的脱敏 JSONL 运行日志路径")
     parser.add_argument("--health-state", help="可选的船司连续失败状态文件路径")
     parser.add_argument("--alert-threshold", type=_positive_int, default=3, help="连续多少轮无成功结果后告警，默认 3")
+    parser.add_argument("--summary-only", action="store_true", help="只输出脱敏查询汇总，不输出柜号和 raw 原始响应")
     args = parser.parse_args(argv)
+    environment = args.environment or os.environ.get("TRACE_ENV", "prod")
+    if environment not in {"test", "prod"}:
+        parser.error("TRACE_ENV 必须是 test 或 prod")
+    config_path = Path(args.db_config) if args.db_config else Path(f"{environment}-db.yml")
 
     try:
         with RunLock(Path(args.lock_file), timeout_seconds=args.lock_timeout_seconds):
@@ -47,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
             samples = _resolve_samples(
                 carrier=carrier,
                 container_no=args.container,
-                config_path=Path(args.db_config),
+                config_path=config_path,
                 days=args.days,
                 limit=args.limit,
             )
@@ -56,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
                 days=args.days,
                 limit=args.limit,
                 carrier=carrier,
+                environment=environment,
                 options=TrackingOptions(
                     headless=args.headless,
                     browser_channel=args.browser_channel,
@@ -72,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
             report["alerts"] = recorder.record(report)
             for alert in report["alerts"]:
                 print(f"告警：{alert['message']}", file=sys.stderr)
-        _print_json(report)
+        _print_json(report, summary_only=args.summary_only)
         return 0 if report["summary"]["failed"] == 0 and report["summary"]["partial"] == 0 else 1
     except Exception as exc:
         print(f"执行失败：{exc}", file=sys.stderr)
@@ -111,6 +124,7 @@ def _build_report(
     limit: int,
     carrier: Carrier | None,
     options: TrackingOptions,
+    environment: str = "prod",
 ) -> dict[str, object]:
     results = query_samples(samples, options=options)
     success = sum(result["status"] == "success" for result in results)
@@ -123,6 +137,7 @@ def _build_report(
             "days": days,
             "limit": limit,
             "carrier": carrier.value if carrier else None,
+            "environment": environment,
             "count": len(samples),
         },
         "summary": {"total": len(results), "success": success, "partial": partial, "failed": failed},
@@ -158,7 +173,13 @@ def _nonnegative_float(value: str) -> float:
     return parsed
 
 
-def _print_json(value: object) -> None:
+def _print_json(value: object, *, summary_only: bool = False) -> None:
+    if summary_only and isinstance(value, dict):
+        value = {
+            "query": value.get("query", {}),
+            "summary": value.get("summary", {}),
+            "alerts": value.get("alerts", []),
+        }
     payload = json.dumps(value, ensure_ascii=False, indent=2, default=str)
     sys.stdout.buffer.write(payload.encode("utf-8") + b"\n")
 

@@ -1,0 +1,4 @@
+# Copy this file to test-db.yml on the test executor, then set the real password.
+url: jdbc:mysql://172.16.48.10:3306/unify?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai&useSSL=false
+username: root
+password: CHANGE_ME

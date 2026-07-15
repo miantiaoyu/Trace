@@ -1,4 +1,7 @@
 prod-db.yml
+test-db.yml
+*.local.yml
+.env
 __pycache__/
 *.py[cod]
 .pytest_cache/

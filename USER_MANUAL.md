@@ -70,7 +70,7 @@ docker compose build
 docker compose run --rm trace
 ```
 
-`prod-db.yml` 只作为 Compose secret 以只读方式挂载到容器，不会复制进镜像。容器默认使用非 root 用户、只读根文件系统、独立临时文件系统、禁止提权、丢弃 Linux capabilities，并限制 1 GiB 内存和 256 个进程。脱敏运行日志、连续失败状态和任务锁保存在 Docker volume `trace_state` 中；不需要状态时可以用 `docker compose down -v` 清理。
+数据库配置通过 `TRACE_DB_CONFIG` 选择，并只作为 Compose secret 以只读方式挂载到容器，不会复制进镜像。默认使用 `./prod-db.yml`；测试环境应设置为 `./test-db.yml`。容器默认使用非 root 用户、只读根文件系统、独立临时文件系统、禁止提权、丢弃 Linux capabilities，并限制 1 GiB 内存和 256 个进程。脱敏运行日志、连续失败状态和任务锁保存在 Docker volume `trace_state` 中；不需要状态时可以用 `docker compose down -v` 清理。
 
 默认命令查询最近 7 天最多 20 个柜号。临时联调可以覆盖参数，例如：
 
@@ -79,6 +79,46 @@ docker compose run --rm trace --carrier HMM --limit 1
 docker compose run --rm trace --carrier MSC --headless --limit 1
 docker compose run --rm trace --container HMMU4706485 --carrier HMM
 ```
+
+### 测试/正式环境隔离
+
+不要让测试任务依赖默认的正式配置。测试服务器上复制 `test-db.yml.example` 为 `test-db.yml`，填入测试库密码，并通过环境变量显式选择：
+
+```bash
+cp test-db.yml.example test-db.yml
+chmod 600 test-db.yml
+export TRACE_ENV=test
+export TRACE_DB_CONFIG=./test-db.yml
+docker compose run --rm trace --summary-only --limit 1
+```
+
+正式环境继续使用 `prod-db.yml`，但应在正式服务器上单独保存，不能从测试服务器复制。命令行也可以显式指定配置文件：
+
+```bash
+TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml \
+  docker compose run --rm trace --summary-only --limit 1
+```
+
+程序也支持现有 Spring 风格的 `url`、`username`、`password` 配置，并会从 `jdbc:mysql://` URL 解析主机和端口。
+
+### 接入 XXL-JOB
+
+Python 可以被 XXL-JOB 调度，但当前项目第一阶段建议使用 XXL-JOB 的 `SHELL` 任务类型，不把 Python 进程伪装成 Java executor。这样 XXL-JOB 负责计划、重试和任务记录，Docker 负责固定 Python/Chromium/Xvfb 环境。
+
+仓库提供 `deploy/xxl-job/trace-test.sh`。把项目部署到 XXL executor 所在机器（默认 `/opt/trace`），确认该 executor 进程有权限执行 Docker，并在 XXL-JOB 中创建一个 `SHELL` 任务，脚本路径填写：
+
+```text
+/opt/trace/deploy/xxl-job/trace-test.sh
+```
+
+脚本默认选择 `test-db.yml`，只输出脱敏汇总，并返回真实退出码：全部成功为 0，出现部分成功或失败为 1。测试时可以手动执行同一个脚本验证：
+
+```bash
+cd /opt/trace
+TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml ./deploy/xxl-job/trace-test.sh
+```
+
+XXL-JOB 的 `appname: unify-executors` 是现有 Java executor 的标识，不要让 Python/Docker 任务复用同一个 appname，除非公司管理员明确要求它们运行在同一 executor 主机上。若后续必须让 Python 自己出现在 XXL-JOB 的执行器列表中，再单独实现 Python HTTP executor，并使用独立的 `trace-test-executors` appname 和端口；这不是当前测试接入的必要条件。
 
 生产环境建议使用宿主机 systemd timer 或受控的 CI 定时触发 `docker compose run --rm trace`，并限制服务器出站访问范围；不要把 `prod-db.yml` 写入镜像、提交 Git 或放进公开日志。该容器没有 Web API，若需要浏览器界面或远程调用，应另行设计鉴权层，不要直接把 CLI 暴露到公网。
 
