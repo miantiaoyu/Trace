@@ -4,6 +4,27 @@
 
 Trace 是一个只读的船司 Track & Trace 查询工具。它从公司只读库读取最近订单中的船司和柜号，根据船司进入不同的官网 HTTP/浏览器路线，并在控制台输出统一 JSON 报告。
 
+## 运行关系
+
+当前部署由四个角色组成：
+
+```text
+本机开发
+  └─ Python 或 Docker 手动运行 ──> 测试数据库 oms（只读）
+
+代码仓库 ──MR/CI 构建镜像──> 镜像仓库
+                              │
+                              └─服务器拉取固定镜像
+                                   └─XXL-JOB SHELL/Python 任务
+                                        └─Docker 容器
+                                             ├─读取测试或正式 oms 配置
+                                             └─访问船司官网并输出报告
+```
+
+Docker 是运行环境封装，不是调度器；XXL-JOB 是调度器，不负责安装 Python 依赖。CICD 的职责是测试代码、构建镜像并发布版本，不能替代数据库配置和 XXL-JOB 的任务配置。
+
+当前项目仍然是“读取源数据、查询官网、输出结果”的只读工具，没有结果表，也不会执行 `INSERT`、`UPDATE` 或 `DELETE`。不要为了接入 XXL-JOB 先给公司数据库加表；先完成测试库 `oms` 的低频回归，再单独设计结果落库。
+
 ## 安装/准备
 
 请在本机 Conda `py312` 环境中安装依赖：
@@ -101,9 +122,13 @@ TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml \
 
 程序也支持现有 Spring 风格的 `url`、`username`、`password` 配置，并会从 `jdbc:mysql://` URL 解析主机和端口。
 
+测试配置中的数据库名是 `oms`。正式配置仍使用独立的 `prod-db.yml`，两者不共享文件、不共享 Docker secret。
+
 ### 接入 XXL-JOB
 
 Python 可以被 XXL-JOB 调度，但当前项目第一阶段建议使用 XXL-JOB 的 `SHELL` 任务类型，不把 Python 进程伪装成 Java executor。这样 XXL-JOB 负责计划、重试和任务记录，Docker 负责固定 Python/Chromium/Xvfb 环境。
+
+XXL-JOB 页面里的“执行器”是“哪台机器可以接收并执行任务”的注册对象；“任务”是具体的计划和脚本。两者不是一回事。你看到的 Python 任务类型通常来自公司 XXL-JOB 版本或插件，它仍然需要一个已经注册、能运行 Python 的 executor 地址。第一阶段使用 SHELL wrapper 可以绕开 Python executor 注册，直接复用公司允许执行 Shell 的 executor；只有管理员要求 Python 进程出现在执行器列表时，才实现原生 Python executor。
 
 仓库提供 `deploy/xxl-job/trace-test.sh`。把项目部署到 XXL executor 所在机器（默认 `/opt/trace`），确认该 executor 进程有权限执行 Docker，并在 XXL-JOB 中创建一个 `SHELL` 任务，脚本路径填写：
 
@@ -119,6 +144,26 @@ TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml ./deploy/xxl-job/trace-test.sh
 ```
 
 XXL-JOB 的 `appname: unify-executors` 是现有 Java executor 的标识，不要让 Python/Docker 任务复用同一个 appname，除非公司管理员明确要求它们运行在同一 executor 主机上。若后续必须让 Python 自己出现在 XXL-JOB 的执行器列表中，再单独实现 Python HTTP executor，并使用独立的 `trace-test-executors` appname 和端口；这不是当前测试接入的必要条件。
+
+### 本机测试到正式发布
+
+建议把“环境选择”放在部署配置里，而不是写死在代码中：
+
+```text
+本机分支/工作区       TRACE_ENV=test + test-db.yml + Docker
+        │
+        └─提交 MR
+             └─CI：单元测试 → Docker build → 镜像安全扫描 → 发布 test 标签
+                                  │
+                                  └─测试服务器/XXL-JOB 使用 test 标签和 oms
+
+MR 合并到主分支
+        └─CI：构建同一份镜像 → 推送正式版本标签
+             └─正式服务器人工批准/发布
+                  └─TRACE_ENV=prod + prod-db.yml + 正式 XXL-JOB 任务
+```
+
+关键点是“同一份已构建镜像晋级”，而不是在正式服务器重新 `git pull` 和重新安装依赖。测试/正式差异只应来自 secret、环境变量、XXL-JOB 任务和镜像标签。具体 CI 平台、镜像仓库地址、审批节点和 XXL-JOB Python 插件需要公司管理员提供，仓库无法凭空推断。
 
 生产环境建议使用宿主机 systemd timer 或受控的 CI 定时触发 `docker compose run --rm trace`，并限制服务器出站访问范围；不要把 `prod-db.yml` 写入镜像、提交 Git 或放进公开日志。该容器没有 Web API，若需要浏览器界面或远程调用，应另行设计鉴权层，不要直接把 CLI 暴露到公网。
 

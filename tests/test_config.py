@@ -25,7 +25,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "test-db.yml"
             config_path.write_text(
-                "url: jdbc:mysql://172.16.48.10:3306/unify?useSSL=false\n"
+                "url: jdbc:mysql://172.16.48.10:3306/oms?useSSL=false\n"
                 "username: root\n"
                 "password: test-secret\n",
                 encoding="utf-8",
