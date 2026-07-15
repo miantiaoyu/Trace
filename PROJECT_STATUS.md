@@ -65,7 +65,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 
 ## 当前限制
 
-- 默认每次最多查询 20 个去重柜号；传 `--limit 0` 才查询最近窗口内的全部柜号。
+- 命令行默认每次最多查询 20 个去重柜号；传 `--limit 0` 查询最近窗口内的全部柜号，XXL-JOB wrapper 默认使用 `--limit 0`。
 - 不做可视化；默认不写库，`--persist` 只更新 `oms.headway` 当前快照，不写 ERP 源表；原始 JSON 只保留最新一次。
 - 维运网目前只验证到“识别/跳转链接生成”，未直接返回集装箱轨迹事件。
 - MSC 当前走的是官网标准页面流程，不是公开 API 凭证接入；结果仍受官网页面结构、Cookie 弹窗和低频访问策略影响。
@@ -73,7 +73,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 万海在 2026-07-14 的真实回归中有界模式成功，无头模式停留在官网入口校验页；Linux 服务器运行万海时也应通过 Xvfb 提供虚拟显示器。
 - HMM 当前必须使用有界浏览器；Linux 服务器需通过 Xvfb 提供虚拟显示器，传 `--headless` 会明确失败。
 - Docker 运行包默认使用非 root 用户、只读根文件系统和资源限制，不暴露 HTTP 端口；状态文件写入独立 Docker volume。
-- 提供 Linux systemd oneshot service 与 timer 模板；默认每天北京时间 02:10 运行，完整查询结果不进入 journal，脱敏指标保存在状态卷。
+- 提供 Docker Compose 一次性容器运行方式；完整查询结果不进入调度日志，脱敏指标保存在状态卷。
 - 支持通过 `TRACE_ENV`/`TRACE_DB_CONFIG` 隔离测试与正式数据库配置，兼容简单 key/value 和 Spring `jdbc:mysql://` 数据源格式。
 - 提供 XXL-JOB `SHELL` 任务 wrapper，测试环境可由统一调度平台调用 Docker 批处理，不要求 Python 进程注册为 Java executor。
 - 测试配置模板使用 `oms` 数据库；`--persist` 模式按拼柜号 upsert `oms.headway`，不写 ERP 源表。

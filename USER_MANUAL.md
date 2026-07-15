@@ -136,7 +136,16 @@ mysql --host 172.16.48.10 --port 3306 --user root --password oms < sql/headway.s
 
 ```bash
 TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml \
-  docker compose run --rm trace --summary-only --persist --limit 20
+  docker compose run --rm trace \
+  --db-config /run/secrets/trace-db.yml \
+  --days 7 \
+  --limit 0 \
+  --lock-file /var/lib/trace/.trace-api-probe.lock \
+  --run-log /var/lib/trace/trace-runs.jsonl \
+  --health-state /var/lib/trace/trace-health.json \
+  --alert-threshold 3 \
+  --summary-only \
+  --persist
 ```
 
 写入逻辑按拼柜号 upsert：同一个 `PG+日期...` 只保留一条最新记录；已在最终卸船港实际卸船的记录不会被普通定时任务再次查询。查询失败只更新错误和重试时间，不覆盖上一份有效快照。
@@ -182,7 +191,7 @@ MR 合并到主分支
 
 关键点是“同一份已构建镜像晋级”，而不是在正式服务器重新 `git pull` 和重新安装依赖。测试/正式差异只应来自 secret、环境变量、XXL-JOB 任务和镜像标签。具体 CI 平台、镜像仓库地址、审批节点和 XXL-JOB Python 插件需要公司管理员提供，仓库无法凭空推断。
 
-生产环境建议使用宿主机 systemd timer 或受控的 CI 定时触发 `docker compose run --rm trace`，并限制服务器出站访问范围；不要把 `prod-db.yml` 写入镜像、提交 Git 或放进公开日志。该容器没有 Web API，若需要浏览器界面或远程调用，应另行设计鉴权层，不要直接把 CLI 暴露到公网。
+生产环境建议使用 XXL-JOB `SHELL` 任务或受控的 CI 定时触发 Docker 一次性容器，并限制服务器出站访问范围；不要把 `prod-db.yml` 写入镜像、提交 Git 或放进公开日志。该容器没有 Web API，若需要浏览器界面或远程调用，应另行设计鉴权层，不要直接把 CLI 暴露到公网。
 
 ### 查看运行效果
 
@@ -196,7 +205,7 @@ docker compose run --rm trace --carrier HMM --limit 1
 
 完整 JSON 包含柜号和官网原始响应，只应在受控终端查看，不要转发到公开日志。命令结束后容器自动删除；Docker 镜像和 `trace_state` 状态卷会保留。
 
-定时任务默认不把完整 JSON 写入 systemd journal。查看最近 20 次脱敏运行指标：
+定时任务默认不把完整 JSON 写入调度日志。查看最近 20 次脱敏运行指标：
 
 ```bash
 cd /opt/trace
@@ -205,45 +214,6 @@ docker compose run --rm --no-deps -T --entrypoint sh trace \
 ```
 
 每行包含运行时间、查询范围、成功/失败数量、重试次数和平均耗时，不包含柜号、原始响应或数据库凭证。
-
-### 配置 systemd 定时运行
-
-仓库提供的模板假定项目位于 `/opt/trace`，并且 `docker` 位于 `/usr/bin/docker`。如果服务器路径不同，先修改 `deploy/systemd/trace.service` 中的 `WorkingDirectory`、`ConditionPathExists` 和 Docker 路径。
-
-安装并启动定时器：
-
-```bash
-cd /opt/trace
-sudo install -m 0644 deploy/systemd/trace.service /etc/systemd/system/trace.service
-sudo install -m 0644 deploy/systemd/trace.timer /etc/systemd/system/trace.timer
-sudo systemctl daemon-reload
-sudo systemctl enable --now trace.timer
-```
-
-默认每天北京时间 02:10 触发，并随机延迟最多 5 分钟；服务器错过执行时间后会在下次启动时补跑一次。首次部署应先手动触发并观察：
-
-```bash
-sudo systemctl start trace.service
-sudo systemctl status trace.service --no-pager
-sudo journalctl -u trace.service -n 100 --no-pager
-systemctl list-timers trace.timer
-```
-
-`trace.service` 是一次性任务，成功结束后显示 `inactive (dead)` 属于正常现象，退出码应为 0。查询出现部分成功或失败时程序退出码为 1，systemd 会将本轮标记为失败；详细的脱敏统计仍可从 `trace-runs.jsonl` 查看。
-
-修改执行时间时编辑 `/etc/systemd/system/trace.timer` 的 `OnCalendar`，然后执行：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart trace.timer
-systemctl list-timers trace.timer
-```
-
-暂停定时运行：
-
-```bash
-sudo systemctl disable --now trace.timer
-```
 
 手动指定柜号进行单条联调，不读取数据库：
 
