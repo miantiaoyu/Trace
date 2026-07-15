@@ -1,0 +1,18 @@
+[Unit]
+Description=Trace container tracking batch
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+ConditionPathExists=/opt/trace/docker-compose.yml
+ConditionPathExists=/opt/trace/prod-db.yml
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/trace
+ExecStartPre=/usr/bin/docker compose config --quiet
+ExecStart=/usr/bin/docker compose run --rm --no-deps -T trace
+TimeoutStartSec=0
+TimeoutStopSec=90
+StandardOutput=null
+StandardError=journal
+SyslogIdentifier=trace

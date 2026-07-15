@@ -82,6 +82,67 @@ docker compose run --rm trace --container HMMU4706485 --carrier HMM
 
 生产环境建议使用宿主机 systemd timer 或受控的 CI 定时触发 `docker compose run --rm trace`，并限制服务器出站访问范围；不要把 `prod-db.yml` 写入镜像、提交 Git 或放进公开日志。该容器没有 Web API，若需要浏览器界面或远程调用，应另行设计鉴权层，不要直接把 CLI 暴露到公网。
 
+### 查看运行效果
+
+当前项目没有网页界面。人工验证时，直接运行一条低频查询，终端会打印包含 `summary`、`normalized` 和 `raw` 的完整 JSON：
+
+```bash
+cd /opt/trace
+docker compose build
+docker compose run --rm trace --carrier HMM --limit 1
+```
+
+完整 JSON 包含柜号和官网原始响应，只应在受控终端查看，不要转发到公开日志。命令结束后容器自动删除；Docker 镜像和 `trace_state` 状态卷会保留。
+
+定时任务默认不把完整 JSON 写入 systemd journal。查看最近 20 次脱敏运行指标：
+
+```bash
+cd /opt/trace
+docker compose run --rm --no-deps -T --entrypoint sh trace \
+  -c 'tail -n 20 /var/lib/trace/trace-runs.jsonl'
+```
+
+每行包含运行时间、查询范围、成功/失败数量、重试次数和平均耗时，不包含柜号、原始响应或数据库凭证。
+
+### 配置 systemd 定时运行
+
+仓库提供的模板假定项目位于 `/opt/trace`，并且 `docker` 位于 `/usr/bin/docker`。如果服务器路径不同，先修改 `deploy/systemd/trace.service` 中的 `WorkingDirectory`、`ConditionPathExists` 和 Docker 路径。
+
+安装并启动定时器：
+
+```bash
+cd /opt/trace
+sudo install -m 0644 deploy/systemd/trace.service /etc/systemd/system/trace.service
+sudo install -m 0644 deploy/systemd/trace.timer /etc/systemd/system/trace.timer
+sudo systemctl daemon-reload
+sudo systemctl enable --now trace.timer
+```
+
+默认每天北京时间 02:10 触发，并随机延迟最多 5 分钟；服务器错过执行时间后会在下次启动时补跑一次。首次部署应先手动触发并观察：
+
+```bash
+sudo systemctl start trace.service
+sudo systemctl status trace.service --no-pager
+sudo journalctl -u trace.service -n 100 --no-pager
+systemctl list-timers trace.timer
+```
+
+`trace.service` 是一次性任务，成功结束后显示 `inactive (dead)` 属于正常现象，退出码应为 0。查询出现部分成功或失败时程序退出码为 1，systemd 会将本轮标记为失败；详细的脱敏统计仍可从 `trace-runs.jsonl` 查看。
+
+修改执行时间时编辑 `/etc/systemd/system/trace.timer` 的 `OnCalendar`，然后执行：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart trace.timer
+systemctl list-timers trace.timer
+```
+
+暂停定时运行：
+
+```bash
+sudo systemctl disable --now trace.timer
+```
+
 手动指定柜号进行单条联调，不读取数据库：
 
 ```bash
