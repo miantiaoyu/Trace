@@ -1,10 +1,30 @@
 import unittest
 
 from trace_api_probe.carriers import Carrier
-from trace_api_probe.normalization import normalize_tracking
+from trace_api_probe.normalization import _derive_headway_semantics, normalize_tracking
 
 
 class NormalizationTests(unittest.TestCase):
+    def test_derives_actual_departure_and_destination_discharge(self) -> None:
+        result = {
+            "origin": "ORIGIN",
+            "destination": "DESTINATION",
+            "origin_port": "ORIGIN",
+            "destination_port": "DESTINATION",
+            "events": [
+                {"time": "2026-07-10 10:00", "status": "Vessel Departure", "location": "ORIGIN", "time_type": "ACTUAL"},
+                {"time": "2026-07-20 10:00", "status": "Vessel Discharged", "location": "TRANSIT", "time_type": "ACTUAL"},
+                {"time": "2026-07-25 10:00", "status": "Vessel Discharged", "location": "DESTINATION", "time_type": "ACTUAL"},
+            ],
+            "coverage": {},
+        }
+
+        derived = _derive_headway_semantics(result)
+
+        self.assertEqual(derived["departure_time"], "2026-07-10 10:00")
+        self.assertTrue(derived["is_arrived_destination"])
+        self.assertEqual(derived["destination_arrived_at"], "2026-07-25 10:00")
+
     def test_normalizes_yang_ming_events_and_current_location(self) -> None:
         raw = {
             "containerList": [
@@ -105,7 +125,8 @@ class NormalizationTests(unittest.TestCase):
 
         self.assertEqual(result["origin"], "XIAMEN, CHINA - XIAMEN TERMINAL")
         self.assertEqual(result["destination"], "SAVANNAH, GA - GARDEN CITY")
-        self.assertEqual(result["destination_eta"], "2026-08-16 12:27")
+        self.assertEqual(result["destination_port"], "SAVANNAH, GA - GARDEN CITY")
+        self.assertEqual(result["destination_eta"], "2026-08-16 00:30")
         self.assertEqual(result["events"][0]["mode"], "Vessel")
         self.assertEqual(result["events"][0]["vessel"], "GSL CHLOE")
         self.assertEqual(result["events"][0]["voyage"], "2610N")

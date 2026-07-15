@@ -8,7 +8,8 @@ from pathlib import Path
 
 from trace_api_probe.carriers import Carrier, parse_carrier
 from trace_api_probe.config import read_db_config
-from trace_api_probe.db import ShipmentSample, fetch_recent_shipments
+from trace_api_probe.db import ShipmentSample, fetch_pending_shipments, fetch_recent_shipments
+from trace_api_probe.headway import persist_headway
 from trace_api_probe.runtime import RunLock, RunRecorder
 from trace_api_probe.tracking import TrackingOptions, query_samples
 
@@ -47,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--health-state", help="可选的船司连续失败状态文件路径")
     parser.add_argument("--alert-threshold", type=_positive_int, default=3, help="连续多少轮无成功结果后告警，默认 3")
     parser.add_argument("--summary-only", action="store_true", help="只输出脱敏查询汇总，不输出柜号和 raw 原始响应")
+    parser.add_argument("--persist", action="store_true", help="将最新查询快照写入 oms.headway")
     args = parser.parse_args(argv)
     environment = args.environment or os.environ.get("TRACE_ENV", "prod")
     if environment not in {"test", "prod"}:
@@ -60,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
                 carrier=carrier,
                 container_no=args.container,
                 config_path=config_path,
+                environment=environment,
+                persist=args.persist,
                 days=args.days,
                 limit=args.limit,
             )
@@ -69,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
                 limit=args.limit,
                 carrier=carrier,
                 environment=environment,
+                persist=args.persist,
                 options=TrackingOptions(
                     headless=args.headless,
                     browser_channel=args.browser_channel,
@@ -83,6 +88,13 @@ def main(argv: list[str] | None = None) -> int:
                 alert_threshold=args.alert_threshold,
             )
             report["alerts"] = recorder.record(report)
+            if args.persist:
+                report["persistence"] = persist_headway(
+                    read_db_config(config_path),
+                    environment=environment,
+                    samples=samples,
+                    results=report["results"],
+                )
             for alert in report["alerts"]:
                 print(f"告警：{alert['message']}", file=sys.stderr)
         _print_json(report, summary_only=args.summary_only)
@@ -97,6 +109,8 @@ def _resolve_samples(
     carrier: Carrier | None,
     container_no: str | None,
     config_path: Path,
+    environment: str,
+    persist: bool,
     days: int,
     limit: int,
 ) -> list[ShipmentSample]:
@@ -114,6 +128,8 @@ def _resolve_samples(
         ]
 
     db_config = read_db_config(config_path)
+    if persist:
+        return fetch_pending_shipments(db_config, environment=environment, days=days, carrier=carrier, limit=limit)
     return fetch_recent_shipments(db_config, days=days, carrier=carrier, limit=limit)
 
 
@@ -125,6 +141,7 @@ def _build_report(
     carrier: Carrier | None,
     options: TrackingOptions,
     environment: str = "prod",
+    persist: bool = False,
 ) -> dict[str, object]:
     results = query_samples(samples, options=options)
     success = sum(result["status"] == "success" for result in results)
@@ -133,7 +150,8 @@ def _build_report(
     return {
         "query": {
             "source": "trobs.po_cabinet_combination",
-            "read_only": True,
+            "read_only": not persist,
+            "persist": persist,
             "days": days,
             "limit": limit,
             "carrier": carrier.value if carrier else None,
@@ -179,6 +197,7 @@ def _print_json(value: object, *, summary_only: bool = False) -> None:
             "query": value.get("query", {}),
             "summary": value.get("summary", {}),
             "alerts": value.get("alerts", []),
+            "persistence": value.get("persistence", {}),
         }
     payload = json.dumps(value, ensure_ascii=False, indent=2, default=str)
     sys.stdout.buffer.write(payload.encode("utf-8") + b"\n")

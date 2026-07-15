@@ -1,6 +1,6 @@
 # 头程追踪表设计草案
 
-本文只描述数据模型和查询流程，不包含建表 SQL，也不改变当前程序的只读行为。表名 `trace_first_leg` 只是暂定名，最终以业务库命名规范为准。
+本文描述 `oms.headway` 的数据模型和查询流程；建表 SQL 位于 `sql/headway.sql`。
 
 ## 设计目标
 
@@ -12,11 +12,11 @@
 
 ## 记录粒度和身份
 
-建议一行代表一个拼柜号的“当前追踪快照”。当前代码从 `trobs.po_cabinet_combination` 只读取了以下字段；实现前还需要补充 ERP 拼柜号的真实字段名：
+一行代表一个拼柜号的“当前追踪快照”。数据来自 `trobs.po_cabinet_combination`：
 
 | 业务含义 | 来源字段 | 目标字段建议 |
 | --- | --- | --- |
-| 拼柜号 | 待确认真实列名 | `consolidation_no` |
+| 拼柜号 | `cabinet_combination_number` | `consolidation_no` |
 | 船司原始值 | `shipping_company` | `erp_shipping_company` |
 | 规范化船司 | 查询归一化结果 | `carrier_code` |
 | 柜号 | `cabinet_no` | `container_no` |
@@ -75,7 +75,7 @@
 | `last_error_type` | VARCHAR | 最近一次失败类型 |
 | `last_error_message` | VARCHAR/TEXT | 脱敏后的失败信息，不保存密码、Cookie 或完整响应 |
 | `raw_response_json` | JSON | 最近一次成功取得的船司原始 JSON |
-| `normalized_schema_version` | VARCHAR | 统一摘要契约版本，例如 `1.1` |
+| `normalized_schema_version` | VARCHAR | 统一摘要契约版本，当前为 `1.2` |
 | `coverage_json` | JSON | 当前摘要覆盖情况，例如是否有 ETA、船舶、当前位置 |
 | `created_at` | DATETIME | 头程记录首次创建时间 |
 | `updated_at` | DATETIME | 头程记录最后更新时间 |
@@ -101,10 +101,9 @@
 - 柜号查询索引：`environment + container_no`
 - 运维查询索引：`environment + query_status + last_queried_at`
 
-## 需要你确认的事项
+## 已确认决策
 
-1. ERP 中“拼柜号（PG+日期...）”的真实列名是什么？当前代码尚未读取该列。
-2. 一个拼柜号是否始终只对应一个物理柜号和一个船司？设计会把不一致情况当作数据异常。
-3. 头程表的正式表名是否使用 `trace_first_leg`？
-
-结果表确定建在 `oms` 库；出发时间只保存实际值；原始 JSON 只保留最新一次；目的地按最终卸船港定义。以上三个剩余事项确认后再生成 SQL，并实现 ERP 聚合查询、结果 upsert 和测试/正式数据库配置逻辑。
+- ERP 拼柜号字段为 `cabinet_combination_number`，且人工保证不重复。
+- 一个拼柜号应对应一个物理柜号和一个船司；不一致时作为 ERP 数据异常隔离。
+- 正式表名为 `oms.headway`。
+- 出发时间只保存实际值，原始 JSON 只保留最新一次，目的地按最终卸船港定义。

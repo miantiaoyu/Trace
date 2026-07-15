@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from trace_api_probe.carriers import Carrier
 from trace_api_probe.config import DbConfig
-from trace_api_probe.db import fetch_recent_shipments
+from trace_api_probe.db import _group_samples, fetch_recent_shipments
 
 
 class FakeCursor:
@@ -40,11 +40,22 @@ class FakeConnection:
 
 
 class DbTests(unittest.TestCase):
-    def test_fetches_recent_rows_and_deduplicates_container_numbers(self) -> None:
+    def test_marks_conflicting_containers_in_same_consolidation_as_source_error(self) -> None:
+        samples = _group_samples(
+            [
+                {"id": 2, "shipping_company": "HMM", "cabinet_no": "HMMU0000001", "cabinet_combination_number": "PG20260713001", "update_time": "2026-07-13", "create_time": None},
+                {"id": 1, "shipping_company": "HMM", "cabinet_no": "HMMU0000002", "cabinet_combination_number": "PG20260713001", "update_time": "2026-07-12", "create_time": None},
+            ]
+        )
+
+        self.assertEqual(len(samples), 1)
+        self.assertIn("多个柜号", samples[0].source_error or "")
+
+    def test_fetches_recent_rows_and_groups_by_consolidation_number(self) -> None:
         cursor = FakeCursor(
             [
-                {"id": 2, "shipping_company": "YML阳明", "cabinet_no": "YMMU0000002", "update_time": "2026-07-13", "create_time": None},
-                {"id": 1, "shipping_company": "YML阳明", "cabinet_no": "YMMU0000002", "update_time": "2026-07-12", "create_time": None},
+                {"id": 2, "shipping_company": "YML阳明", "cabinet_no": "YMMU0000002", "cabinet_combination_number": "PG20260713001", "update_time": "2026-07-13", "create_time": None},
+                {"id": 1, "shipping_company": "YML阳明", "cabinet_no": "YMMU0000002", "cabinet_combination_number": "PG20260713001", "update_time": "2026-07-12", "create_time": None},
             ]
         )
         fake_module = types.SimpleNamespace(
@@ -61,6 +72,8 @@ class DbTests(unittest.TestCase):
             )
 
         self.assertEqual([item.container_no for item in result], ["YMMU0000002"])
+        self.assertEqual(result[0].consolidation_no, "PG20260713001")
+        self.assertEqual(result[0].erp_order_count, 2)
         self.assertIn("INTERVAL 7 DAY", cursor.query)
         self.assertIn("ORDER BY update_time DESC, id DESC", cursor.query)
         self.assertEqual(cursor.params, ["YML", "YML阳明", "YML 阳明", "阳明", "YANGMING", "YANG MING"])
@@ -68,7 +81,7 @@ class DbTests(unittest.TestCase):
     def test_hmm_query_has_prefix_fallback_for_mojibake_company_name(self) -> None:
         cursor = FakeCursor(
             [
-                {"id": 3, "shipping_company": "HMM ş«ĐÂ BCO", "cabinet_no": "HMMU4706485", "update_time": "2026-07-13", "create_time": None},
+                {"id": 3, "shipping_company": "HMM ş«ĐÂ BCO", "cabinet_no": "HMMU4706485", "cabinet_combination_number": "PG20260713002", "update_time": "2026-07-13", "create_time": None},
             ]
         )
         fake_module = types.SimpleNamespace(
@@ -95,6 +108,7 @@ class DbTests(unittest.TestCase):
                     "id": 4,
                     "shipping_company": "EMC 长荣",
                     "cabinet_no": " EGHU 9204414 ",
+                    "cabinet_combination_number": "PG20260713003",
                     "update_time": "2026-07-13",
                     "create_time": None,
                 }

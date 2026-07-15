@@ -30,15 +30,18 @@ class TrackingEvent(StatusSnapshot):
 
 
 class Coverage(StrictModel):
+    departure: bool = False
     current: bool = False
     next_expected: bool = False
     events: bool = False
     vessel: bool = False
     eta: bool = False
+    destination_port: bool = False
+    destination_arrival: bool = False
 
 
 class TrackingSummary(StrictModel):
-    schema_version: Literal["1.1"] = "1.1"
+    schema_version: Literal["1.2"] = "1.2"
     carrier: str = Field(min_length=1)
     container: str = Field(min_length=1)
     current: StatusSnapshot = Field(default_factory=StatusSnapshot)
@@ -46,7 +49,13 @@ class TrackingSummary(StrictModel):
     vessel: VesselSummary = Field(default_factory=VesselSummary)
     origin: str | None = None
     destination: str | None = None
+    departure_time: str | None = None
+    origin_port: str | None = None
+    destination_port: str | None = None
     destination_eta: str | None = None
+    is_arrived_destination: bool = False
+    destination_arrived_at: str | None = None
+    destination_arrival_evidence: str | None = None
     events: list[TrackingEvent] = Field(default_factory=list)
     coverage: Coverage = Field(default_factory=Coverage)
 

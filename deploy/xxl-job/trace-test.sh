@@ -8,4 +8,4 @@ cd "${PROJECT_DIR}"
 export TRACE_ENV="${TRACE_ENV:-test}"
 export TRACE_DB_CONFIG="${TRACE_DB_CONFIG:-./test-db.yml}"
 
-exec docker compose run --rm --no-deps -T trace --summary-only
+exec docker compose run --rm --no-deps -T trace --summary-only --persist

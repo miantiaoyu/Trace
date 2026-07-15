@@ -146,6 +146,9 @@ class TrackingRouter:
         options = options or TrackingOptions()
         carrier = normalize_carrier(sample.shipping_company)
         result = _sample_metadata(sample, carrier)
+        if sample.source_error:
+            result.update(status="source_data_error", route="source_validation", error=sample.source_error)
+            return result
         if carrier is None:
             result.update(
                 status="unsupported_carrier",
@@ -243,6 +246,8 @@ def _sample_metadata(sample: ShipmentSample, carrier: Carrier | None) -> dict[st
         "container": sample.container_no,
         "update_time": sample.update_time,
         "create_time": sample.create_time,
+        "consolidation_no": sample.consolidation_no,
+        "erp_order_count": sample.erp_order_count,
     }
 
 

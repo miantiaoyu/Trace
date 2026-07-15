@@ -14,7 +14,7 @@ def normalize_tracking(carrier: Carrier, container: str, raw: object) -> dict[st
     normalizer = _NORMALIZERS.get(carrier)
     if normalizer is None or not isinstance(raw, Mapping):
         return result
-    return validate_tracking_summary(normalizer(result, raw))
+    return validate_tracking_summary(_derive_headway_semantics(normalizer(result, raw)))
 
 
 def empty_tracking_summary(carrier: Carrier, container: str) -> dict[str, object]:
@@ -93,7 +93,10 @@ def _normalize_hmm(result: dict[str, object], raw: Mapping[str, Any]) -> dict[st
         destination_index = header.index("destination")
         result["origin"] = _hmm_location(rows, origin_index)
         result["destination"] = _hmm_location(rows, destination_index)
-        eta = _at(rows.get("arrival(etb)", []), destination_index)
+        discharging_index = header.index("discharging port") if "discharging port" in header else destination_index
+        result["origin_port"] = _hmm_location(rows, header.index("loading port")) if "loading port" in header else result["origin"]
+        result["destination_port"] = _hmm_location(rows, discharging_index)
+        eta = _at(rows.get("arrival(etb)", []), discharging_index)
         if eta:
             result["destination_eta"] = eta
             _coverage(result)["eta"] = True
@@ -541,6 +544,66 @@ def _apply_events(result: dict[str, object], events: list[dict[str, object]]) ->
             "imo": vessel_event.get("imo"),
         }
         coverage["vessel"] = True
+
+
+def _derive_headway_semantics(result: dict[str, object]) -> dict[str, object]:
+    """Derive conservative headway fields from provider-normalized events."""
+    coverage = _coverage(result)
+    if not result.get("origin_port"):
+        result["origin_port"] = result.get("origin")
+    if not result.get("destination_port"):
+        result["destination_port"] = result.get("destination")
+    coverage["destination_port"] = bool(result.get("destination_port"))
+
+    events = [event for event in result.get("events", []) if isinstance(event, Mapping)]
+    actual_events = [event for event in events if event.get("time_type") == "ACTUAL"]
+    departure_candidates = [event for event in actual_events if _is_departure_status(event.get("status"))]
+    if departure_candidates:
+        origin_matches = [
+            event for event in departure_candidates if _location_matches(event.get("location"), result.get("origin_port"))
+        ]
+        selected = min(origin_matches or departure_candidates, key=_event_time_key)
+        result["departure_time"] = _text(selected.get("time"))
+        coverage["departure"] = bool(result["departure_time"])
+
+    destination_port = result.get("destination_port")
+    arrival_candidates = [
+        event
+        for event in actual_events
+        if _is_destination_discharge_status(event.get("status"))
+        and _location_matches(event.get("location"), destination_port)
+    ]
+    if arrival_candidates:
+        selected = max(arrival_candidates, key=_event_time_key)
+        result["is_arrived_destination"] = True
+        result["destination_arrived_at"] = _text(selected.get("time"))
+        result["destination_arrival_evidence"] = _text(selected.get("status"))
+        coverage["destination_arrival"] = True
+    return result
+
+
+def _is_departure_status(value: object) -> bool:
+    text = (_text(value) or "").lower()
+    return any(
+        marker in text
+        for marker in ("departure", "departed", "loaded on vessel", "loaded (fcl) on vessel", "装船", "离港", "离开")
+    )
+
+
+def _is_destination_discharge_status(value: object) -> bool:
+    text = (_text(value) or "").lower()
+    if any(marker in text for marker in ("t/s", "transshipment", "transhipment", "转运")):
+        return False
+    return any(marker in text for marker in ("discharg", "卸船", "卸货"))
+
+
+def _location_matches(location: object, destination: object) -> bool:
+    left = (_text(location) or "").lower()
+    right = (_text(destination) or "").lower()
+    if not left or not right:
+        return False
+    right_city = right.split(" - ", 1)[0]
+    return left in right or right_city in left or left in right_city
 
 
 def _event_snapshot(event: Mapping[str, object]) -> dict[str, object]:

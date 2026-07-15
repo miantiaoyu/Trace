@@ -9,7 +9,7 @@ class TrackingModelsTests(unittest.TestCase):
     def test_creates_fixed_empty_summary(self) -> None:
         result = new_tracking_summary("MAERSK", "MSKU0000001")
 
-        self.assertEqual(result["schema_version"], "1.1")
+        self.assertEqual(result["schema_version"], "1.2")
         self.assertEqual(result["current"]["status"], None)
         self.assertEqual(result["events"], [])
         self.assertFalse(result["coverage"]["current"])
