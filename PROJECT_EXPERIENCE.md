@@ -32,17 +32,19 @@
 - ONE: `trakNoParam=<柜号>` 可直接打开 ONE 官方查询页并返回主表、船期和事件表。
 - COSCO: `trackingType=containerNumber&number=<柜号>` 可直接打开官方查询页并返回事件表。
 - SM Line: 必须先建立临时 `JSESSIONID`，且柜号首查 `f_cmd=122`；后续状态、船期、明细依次使用 123、124、125。
-- Yang Ming: 公开 JSON 接口可直接按柜号调用；微运给出的旧页面路径需要修正。
-- Evergreen: 官方中国站的公开页面可直接 `POST` 到 `TDB1_CargoTracking.do`。柜号查询参数为 `TYPE=CNTR`、`SEL=s_cntr`、`CNTR=<柜号>`、`NO=<柜号>`；页面返回柜型、最新动态和地点，无需验证码或登录。
+- Yang Ming: 公开 JSON 接口可直接按柜号调用；微运给出的旧页面路径需要修正。`dportETA` 可能是 `ETA at <port>: YYYY/MM/DD HH:MM`，写入 `DATETIME` 前必须去除说明前缀。
+- Evergreen: 官方中国站的公开页面可直接 `POST` 到 `TDB1_CargoTracking.do`。柜号查询参数为 `TYPE=CNTR`、`SEL=s_cntr`、`CNTR=<柜号>`、`NO=<柜号>`；真实 HTML 可能把页面说明和数据拼入同一表头单元格，数据行仍为固定 8 列。应用已知业务表头对数据行建模，并从页面文本单独提取预计抵达时间。
 - Maersk: 直接重放追踪接口会返回 401，但官网中国站 `tracking/<柜号>` 可在全新浏览器会话中返回页面自身请求的完整 JSON。应由 Playwright 等待 `/synergy/tracking/` 的 200 响应并读取响应体，不提取或伪造凭证。
 - MSC: 直接访问部分入口时可能遇到 Akamai 403，但标准官网查询页 `https://www.msc.com/en/track-a-shipment?agencyPath=hkg` 可通过普通浏览器流程完成查询。先接受 Cookie，再填写 `#trackingNumber`，点击 `form.js-form button.msc-search-autocomplete__search`，随后等待 `/api/feature/tools/TrackingInfo` 的 `POST 200` 响应并读取原始 JSON；不复用外部 Cookie，不补伪造请求头。
 - HMM: 无头 Chromium/Edge 会遇到 Akamai 403 或 HTTP/2 协议错误，但有界 Chromium 可直接进入 `https://www.hmm21.com/e-service/general/trackNTrace/TrackNTrace.do`。填写 `input[name="srchCntrNo1"]` 后点击 `button[onclick="search()"]`，页面会带着自己的 CSRF token 向 `selectTrackNTrace.do` 提交 POST 并返回追踪 HTML。服务器应使用有界 Chromium；Linux 通过 Xvfb 提供显示，不绕过官网校验。只读库中的 HMM 名称可能为 `HMM` 加乱码后缀，SQL 需要 `HMM%` 前缀兜底。
 - HMM 的真实样本页面包含 8 至 9 张表，单据状态表会随业务状态出现或缺失，不能按表格序号解析。稳定区块应按表头识别：航线表包含 `Origin/Destination`，柜摘要包含 `Container No./Movement`，航段表包含 `Vessel / Voyage`，事件表包含 `Date/Time/Location/Status Description`。事件表的 `Mode` 在陆运时是 `Truck`，在海运时实际是“船名 + 航次”，需要拆分后再映射到统一字段。
-- Wan Hai: 新站 `https://cn.wanhai.com/cec/#/cargotracking` 在当前环境会先落到前置校验页，普通 HTTP 和直接首跳浏览器抓取都不稳定。可行路径是访问旧站 `https://www.wanhai.com/views/cargoTrack/CargoTrack.xhtml?file_num=65580`，在同一标准浏览器会话中预热两次后进入 `tracking_query.xhtml`，再带着官网发下来的会话 Cookie 与 `javax.faces.ViewState` 向 `tracking_query.xhtml` 发送标准表单 POST。返回页可稳定提取 `Ctnr No.`、`Status Name`、`Ctnr Depot Name`、`Voyage`、`Vessel Name` 等字段。列表页 `More detail` 会带出 Booking/B/L 编号，例如 `026G533793`；继续用 `cargoType=2` 的 `Book No. / BL no.` 模式查询，可取得 `BL no.`、`Oboard Date`、`Voyage`、`Vessel Name` 摘要。`Booking Data / B/L Data` 的弹窗 redirect 页当前只稳定到 `loading...` 壳页，不作为项目数据源。
+- HMM 官网在批量期间可能 60 秒不返回追踪响应，但同一柜号隔离后重查可恢复。不应在超时后立即连续请求；第二次尝试前使用 20–25 秒退避，本轮仍失败时写入 `query_failed` 并由下轮到期重查。
+- Wan Hai: 新站 `https://cn.wanhai.com/cec/#/cargotracking` 在当前环境会先落到前置校验页，旧站 `CargoTrack.xhtml` 也可能返回只包含 `/_Incapsula_Resource` 和 incident ID 的拦截页。不绕过该访问控制；识别到拦截页时返回 `query_failed`，由定时任务稍后重试。官网正常时，仍使用同一标准浏览器会话预热后带会话 Cookie 和 `javax.faces.ViewState` 提交标准表单。
 
 ## 访问限制分类
 
-- 已确认可自动化：Yang Ming、SM Line、COSCO、ONE、Evergreen、Maersk、MSC、Wan Hai、HMM（有界浏览器）。
+- 已确认可自动化：Yang Ming、SM Line、COSCO、ONE、Evergreen、Maersk、MSC、HMM（有界浏览器）。
+- 路线已验证但当前受访问前置校验影响：Wan Hai（Incapsula）。
 - 需要人工验证码，当前不绕过：CMA CGM（DataDome）、OOCL（Cloudflare Turnstile）、ZIM 中国站（Cloudflare）、TS Lines（查询表单含验证码）、Hapag-Lloyd（Cloudflare）。
 - 访问前置校验或 CDN 拒绝：KMTC（Akamai HTTP 403）。
 - 临时服务不可用：SeaLead 的表单可提交，但官网返回追踪页维护通知。

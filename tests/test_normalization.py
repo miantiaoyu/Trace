@@ -305,6 +305,45 @@ class NormalizationTests(unittest.TestCase):
         self.assertEqual(result["current"]["status"], "Empty container returned")
         self.assertEqual(result["current"]["location"], "CORK (IE)")
 
+    def test_normalizes_evergreen_real_page_header_and_eta(self) -> None:
+        raw = {
+            "headers": [
+                "提单列示之船名、航次 EVER ACE 1406-019W (長範輪) "
+                "预计抵达时间 : AUG-05-2026 提单货柜信息和当前动态 "
+                "箱号 柜型 日期 货柜动态 地点 船名 航次 Method VGM"
+            ],
+            "rows": [["EGSU0180491", "40'(SH)", "JUL-02-2026", "Loaded (FCL) on vessel", "YANTIAN, CHINA (CN)", "EVER ACE 1406-019W", "2", "15638.5 KGS"]],
+        }
+
+        result = normalize_tracking(Carrier.EVERGREEN, "EGSU0180491", raw)
+
+        self.assertEqual(result["current"]["status"], "Loaded (FCL) on vessel")
+        self.assertEqual(result["current"]["location"], "YANTIAN, CHINA (CN)")
+        self.assertEqual(result["vessel"]["name"], "EVER ACE")
+        self.assertEqual(result["vessel"]["voyage"], "1406-019W")
+        self.assertEqual(result["destination_eta"], "AUG-05-2026")
+
+    def test_normalizes_yang_ming_eta_label_to_datetime_text(self) -> None:
+        raw = {
+            "containerList": [
+                {
+                    "ctStatusInfo": [
+                        {
+                            "dportETA": "ETA at SINGAPORE: 2026/07/24 22:00",
+                            "moveDate": "2026/07/14 10:00",
+                            "eventDesc": "Loaded on vessel",
+                            "atFacility": "SHANGHAI",
+                            "eventClassifie": "ACTUAL",
+                        }
+                    ]
+                }
+            ]
+        }
+
+        result = normalize_tracking(Carrier.YANG_MING, "YMMU0000001", raw)
+
+        self.assertEqual(result["destination_eta"], "2026/07/24 22:00")
+
     def test_normalizes_msc_actual_expected_vessel_and_eta(self) -> None:
         raw = {
             "Data": {

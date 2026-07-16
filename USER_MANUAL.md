@@ -154,7 +154,7 @@ docker compose run --rm trace \
 
 ERP 的 `cabinet_no` 是柜号，`shipping_order` 是订舱号；当前追踪路线只使用 `cabinet_no`。程序会清理柜号内部空白、转为大写，并校验 ISO 6346 格式和校验位。无效柜号返回 `source_data_error`，不会访问船司官网，也不会写入 `headway`。
 
-写入逻辑按拼柜号 upsert：同一个 `PG+日期...` 只保留一条最新记录；ERP 新单只从当前时间往前 60 天内补充尚未进入 `headway` 的拼柜号，已进入 `headway` 的未到达记录按 `next_query_at` 到期重查。查询失败只更新错误和重试时间，不覆盖上一份有效快照；`source_data_error`、没有稳定适配器的 `route_unavailable` 和无法识别船司的 `unsupported_carrier` 计入汇总的 `skipped`，保留在逐条诊断日志中，但不写入 `headway`。
+写入逻辑按拼柜号 upsert：同一个 `PG+日期...` 只保留一条最新记录；ERP 新单只从当前时间往前 60 天内补充尚未进入 `headway` 的拼柜号，已进入 `headway` 的未到达记录按 `next_query_at` 到期重查。`query_failed` 记录默认一小时后到期；有限 `--limit` 时，已到期重查记录排在 ERP 新单之前。成功重查时更新原记录的业务快照和原始 JSON，同时清除上一次错误，不会新增重复拼柜号。查询失败只更新错误和重试时间，不覆盖上一份有效快照；`source_data_error`、没有稳定适配器的 `route_unavailable` 和无法识别船司的 `unsupported_carrier` 计入汇总的 `skipped`，保留在逐条诊断日志中，但不写入 `headway`。
 
 ### 接入 XXL-JOB
 

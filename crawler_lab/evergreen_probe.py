@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -12,6 +13,7 @@ from crawler_lab.html_tables import extract_table_rows
 
 TRACKING_URL = "https://www.evergreen-shipping.cn/servlet/TDB1_CargoTracking.do"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36"
+TRACKING_HEADERS = ("箱号", "柜型", "日期", "货柜动态", "地点", "船名 航次", "Method", "VGM")
 REQUIRED_HEADERS = ("箱号", "货柜动态", "地点")
 
 
@@ -67,18 +69,25 @@ def _extract_tracking_rows(rows: list[list[str]], container: str) -> dict[str, o
     if header_index is None:
         raise TrackingPageError("长荣查询页面未出现轨迹结果表，页面结构或访问策略可能已变化")
 
-    header = rows[header_index]
     data_rows = [row for row in rows[header_index + 1 :] if container in " ".join(row).upper()]
     if not data_rows:
         raise TrackingPageError(f"长荣查询结果未回显柜号 {container}")
 
-    return {
+    result = {
         "carrier": "EVERGREEN",
         "container": container,
         "url": TRACKING_URL,
-        "headers": header,
+        "headers": list(TRACKING_HEADERS),
         "rows": data_rows,
     }
+    eta_match = re.search(
+        r"预计抵达时间\s*[:：]\s*([A-Z]{3}-\d{2}-\d{4})",
+        " ".join(" ".join(row) for row in rows),
+        flags=re.IGNORECASE,
+    )
+    if eta_match:
+        result["destination_eta"] = eta_match.group(1).upper()
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from trace_api_probe.carriers import Carrier
 from trace_api_probe.db import ShipmentSample
-from trace_api_probe.tracking import CarrierRoute, TrackingOptions, TrackingRouter, query_samples
+from trace_api_probe.tracking import ROUTES, CarrierRoute, TrackingOptions, TrackingRouter, query_samples
 
 
 def sample(company: str = "YML阳明", container: str = "YMMU7349033") -> ShipmentSample:
@@ -11,6 +11,13 @@ def sample(company: str = "YML阳明", container: str = "YMMU7349033") -> Shipme
 
 
 class TrackingRouterTests(unittest.TestCase):
+    def test_hmm_policy_uses_conservative_retry_backoff(self) -> None:
+        policy = ROUTES[Carrier.HMM].policy
+
+        self.assertEqual(policy.backoff_base_seconds, 20)
+        self.assertEqual(policy.backoff_max_seconds, 30)
+        self.assertEqual(policy.jitter_seconds, 5)
+
     def test_rejects_invalid_container_before_calling_carrier_adapter(self) -> None:
         calls = []
         routes = {

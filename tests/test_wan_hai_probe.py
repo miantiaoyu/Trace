@@ -5,6 +5,7 @@ from crawler_lab.wan_hai_probe import (
     _extract_booking_summary_rows,
     _extract_reference_numbers,
     _extract_tracking_rows,
+    _is_incapsula_blocked,
 )
 
 
@@ -43,6 +44,25 @@ class WanHaiProbeTests(unittest.TestCase):
 
         self.assertEqual(result["reference"], "026G533793")
         self.assertEqual(result["rows"], [rows[2]])
+
+    def test_detects_incapsula_block_page(self) -> None:
+        html = """
+        <script src="/_Incapsula_Resource?SWJIYLWA=abc"></script>
+        <iframe>Request unsuccessful. Incapsula incident ID: 123</iframe>
+        """
+
+        self.assertTrue(_is_incapsula_blocked(html))
+        self.assertFalse(_is_incapsula_blocked("<form id='cargoTrackV2Bean'></form>"))
+
+    def test_allows_protected_page_when_tracking_form_is_present(self) -> None:
+        html = """
+        <script src="/_Incapsula_Resource?SWJIYLWA=abc"></script>
+        <form id="cargoTrackV2Bean">
+          <input name="javax.faces.ViewState" value="state" />
+        </form>
+        """
+
+        self.assertFalse(_is_incapsula_blocked(html))
 
 
 if __name__ == "__main__":

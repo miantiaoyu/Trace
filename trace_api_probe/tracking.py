@@ -40,7 +40,14 @@ HTTP_POLICY = QueryPolicy(min_interval_seconds=2, timeout_seconds=45, max_attemp
 DOM_POLICY = QueryPolicy(min_interval_seconds=4, timeout_seconds=60, max_attempts=2)
 BROWSER_POLICY = QueryPolicy(min_interval_seconds=6, timeout_seconds=90, max_attempts=2)
 WAN_HAI_POLICY = QueryPolicy(min_interval_seconds=8, timeout_seconds=120, max_attempts=1)
-HMM_POLICY = QueryPolicy(min_interval_seconds=12, timeout_seconds=90, max_attempts=2)
+HMM_POLICY = QueryPolicy(
+    min_interval_seconds=12,
+    timeout_seconds=90,
+    max_attempts=2,
+    backoff_base_seconds=20,
+    backoff_max_seconds=30,
+    jitter_seconds=5,
+)
 
 
 def _yang_ming(container: str, options: TrackingOptions) -> object:

@@ -176,15 +176,79 @@ class DbTests(unittest.TestCase):
                 limit=0,
             )
 
-        self.assertEqual([item.consolidation_no for item in result], ["PG_NEW", "PG_DUE"])
+        self.assertEqual([item.consolidation_no for item in result], ["PG_DUE", "PG_NEW"])
         fetch_recent.assert_called_once_with(source_config, days=60, carrier=None, limit=0)
         fetch_due.assert_called_once_with(target_config, "test")
         fetch_historical.assert_called_once_with(source_config, ["PG_DUE"], carrier=None)
         fetch_states.assert_called_once_with(
             target_config,
             "test",
-            ["PG_NEW", "PG_EXISTING_RECENT", "PG_DUE"],
+            ["PG_DUE", "PG_NEW", "PG_EXISTING_RECENT"],
         )
+
+    def test_pending_shipments_retries_due_query_failure(self) -> None:
+        source_config = DbConfig("aliyun.example", 3306, "reader", "source-secret")
+        target_config = DbConfig("172.16.48.10", 3306, "writer", "target-secret")
+        failed_sample = _sample("PG_FAILED")
+
+        with (
+            patch("trace_api_probe.db.fetch_recent_shipments", return_value=[failed_sample]),
+            patch("trace_api_probe.db._fetch_due_headway_keys", return_value=["PG_FAILED"]),
+            patch("trace_api_probe.db._fetch_shipments_by_consolidation_numbers", return_value=[]),
+            patch(
+                "trace_api_probe.db._fetch_headway_states",
+                return_value={
+                    "PG_FAILED": {
+                        "query_status": "query_failed",
+                        "is_arrived_destination": 0,
+                        "next_query_at": "2000-01-01 00:00:00",
+                    }
+                },
+            ),
+        ):
+            result = fetch_pending_shipments(
+                source_config,
+                target_config,
+                environment="test",
+                days=60,
+                limit=0,
+            )
+
+        self.assertEqual([item.consolidation_no for item in result], ["PG_FAILED"])
+
+    def test_due_query_failure_has_priority_over_new_rows_when_limited(self) -> None:
+        source_config = DbConfig("aliyun.example", 3306, "reader", "source-secret")
+        target_config = DbConfig("172.16.48.10", 3306, "writer", "target-secret")
+        new_samples = [_sample("PG_NEW_1"), _sample("PG_NEW_2")]
+        failed_sample = _sample("PG_FAILED")
+
+        with (
+            patch("trace_api_probe.db.fetch_recent_shipments", return_value=new_samples),
+            patch("trace_api_probe.db._fetch_due_headway_keys", return_value=["PG_FAILED"]),
+            patch(
+                "trace_api_probe.db._fetch_shipments_by_consolidation_numbers",
+                return_value=[failed_sample],
+            ),
+            patch(
+                "trace_api_probe.db._fetch_headway_states",
+                return_value={
+                    "PG_FAILED": {
+                        "query_status": "query_failed",
+                        "is_arrived_destination": 0,
+                        "next_query_at": "2000-01-01 00:00:00",
+                    }
+                },
+            ),
+        ):
+            result = fetch_pending_shipments(
+                source_config,
+                target_config,
+                environment="test",
+                days=60,
+                limit=1,
+            )
+
+        self.assertEqual([item.consolidation_no for item in result], ["PG_FAILED"])
 
 
 if __name__ == "__main__":

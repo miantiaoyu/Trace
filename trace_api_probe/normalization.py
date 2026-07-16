@@ -33,7 +33,7 @@ def _normalize_yang_ming(result: dict[str, object], raw: Mapping[str, Any]) -> d
     _apply_events(result, events)
     eta = _first_value(item.get("ctStatusInfo"), "dportETA")
     if eta:
-        result["destination_eta"] = eta
+        result["destination_eta"] = _strip_eta_label(eta)
         _coverage(result)["eta"] = True
     return result
 
@@ -362,8 +362,11 @@ def _normalize_sm_line(result: dict[str, object], raw: Mapping[str, Any]) -> dic
 
 
 def _normalize_evergreen(result: dict[str, object], raw: Mapping[str, Any]) -> dict[str, object]:
+    headers = raw.get("headers")
+    if not _has_table_labels(headers, {"箱号", "日期", "货柜动态", "地点"}):
+        headers = ["箱号", "柜型", "日期", "货柜动态", "地点", "船名 航次", "Method", "VGM"]
     events = []
-    for item in _table_records(raw.get("headers"), raw.get("rows")):
+    for item in _table_records(headers, raw.get("rows")):
         vessel, voyage = _split_vessel_voyage(item.get("船名 航次"))
         events.append(
             {
@@ -378,7 +381,25 @@ def _normalize_evergreen(result: dict[str, object], raw: Mapping[str, Any]) -> d
             }
         )
     _apply_events(result, events)
+    eta = _text(raw.get("destination_eta")) or _evergreen_eta_from_headers(raw.get("headers"))
+    if eta:
+        result["destination_eta"] = eta
+        _coverage(result)["eta"] = True
     return result
+
+
+def _has_table_labels(headers: object, required: set[str]) -> bool:
+    if not isinstance(headers, list):
+        return False
+    return required.issubset({str(value).strip() for value in headers})
+
+
+def _evergreen_eta_from_headers(headers: object) -> str | None:
+    if not isinstance(headers, list):
+        return None
+    text = " ".join(str(value) for value in headers)
+    match = re.search(r"预计抵达时间\s*[:：]\s*([A-Z]{3}-\d{2}-\d{4})", text, flags=re.IGNORECASE)
+    return match.group(1).upper() if match else None
 
 
 def _normalize_msc(result: dict[str, object], raw: Mapping[str, Any]) -> dict[str, object]:
@@ -704,10 +725,15 @@ def _is_date(value: str) -> bool:
 def _split_vessel_voyage(value: str | None) -> tuple[str | None, str | None]:
     if not value:
         return None, None
-    match = re.fullmatch(r"(.+?)\s+(\d{3,4}[A-Z])", value)
+    match = re.fullmatch(r"(.+?)\s+(\d{3,4}(?:-\d{3})?[A-Z])", value)
     if match is None:
         return None, None
     return match.group(1), match.group(2)
+
+
+def _strip_eta_label(value: str) -> str:
+    match = re.search(r"(\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2})\s*$", value)
+    return match.group(1) if match else value
 
 
 def _location_label(value: object) -> str | None:

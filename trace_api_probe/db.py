@@ -100,7 +100,8 @@ def fetch_pending_shipments(
     pending_keys = _fetch_due_headway_keys(target_config, environment)
     pending_key_set = set(pending_keys)
     historical_candidates = _fetch_shipments_by_consolidation_numbers(source_config, pending_keys, carrier=carrier)
-    candidates = _merge_samples(recent_candidates, historical_candidates)
+    # Due records must not starve behind a continuous stream of new ERP rows when limit is finite.
+    candidates = _merge_samples(historical_candidates, recent_candidates)
     states = _fetch_headway_states(
         target_config,
         environment,

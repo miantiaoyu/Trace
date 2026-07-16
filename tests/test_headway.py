@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 from trace_api_probe.config import DbConfig
@@ -122,6 +123,30 @@ class HeadwayTests(unittest.TestCase):
         self.assertEqual(len(cursor.calls), 1)
         self.assertIn("oms`.`headway", cursor.calls[0][0])
         self.assertEqual(cursor.calls[0][1][1], "PG20260713001")
+        self.assertIn("query_status = VALUES(query_status)", cursor.calls[0][0])
+        self.assertIn("last_error_type = VALUES(last_error_type)", cursor.calls[0][0])
+        self.assertIn("last_error_message = VALUES(last_error_message)", cursor.calls[0][0])
+
+    def test_query_failure_is_scheduled_for_retry(self) -> None:
+        sample = ShipmentSample(1, "HMM", "HMMU0000001", None, None, "PG_FAILED", 1)
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        row = _build_row(
+            "test",
+            sample,
+            {
+                "status": "query_failed",
+                "carrier": "HMM",
+                "route": "hmm_browser_html",
+                "error": {"type": "TimeoutError", "message": "timeout"},
+            },
+        )
+
+        retry_delay = row["next_query_at"] - before
+        self.assertGreaterEqual(retry_delay.total_seconds(), 59 * 60)
+        self.assertLessEqual(retry_delay.total_seconds(), 61 * 60)
+        self.assertEqual(row["query_status"], "query_failed")
+        self.assertIsNone(row["raw_response_json"])
 
     def test_persist_headway_skips_unavailable_routes(self) -> None:
         cursor = FakeCursor()

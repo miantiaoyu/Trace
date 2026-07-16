@@ -148,6 +148,8 @@ def _bootstrap_session(*, headless: bool, browser_channel: str) -> tuple[str, st
             try:
                 for wait_ms in (8_000, 3_000):
                     page.goto(TRACKING_ENTRY_URL, wait_until="domcontentloaded", timeout=60_000)
+                    if _is_incapsula_blocked(page.content()):
+                        raise WanHaiTrackingError("万海当前被 Incapsula 访问策略拦截，本轮结束后稍后重试")
                     page.wait_for_timeout(wait_ms)
                 if "tracking_query.xhtml" not in page.url:
                     raise WanHaiTrackingError(f"万海预热后未进入查询页，当前地址为 {page.url}")
@@ -170,6 +172,16 @@ def _bootstrap_session(*, headless: bool, browser_channel: str) -> tuple[str, st
     if not viewstate:
         raise WanHaiTrackingError("万海查询页缺少 javax.faces.ViewState")
     return cookie_header, viewstate
+
+
+def _is_incapsula_blocked(html: str) -> bool:
+    normalized = html.lower()
+    has_tracking_form = "cargotrackv2bean" in normalized and "javax.faces.viewstate" in normalized
+    if has_tracking_form:
+        return False
+    has_incapsula_resource = "_incapsula_resource" in normalized
+    has_failure_marker = "incapsula incident id" in normalized or "request unsuccessful" in normalized
+    return has_incapsula_resource and has_failure_marker
 
 
 def _extract_tracking_rows(rows: list[list[str]], container: str) -> dict[str, object]:
