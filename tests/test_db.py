@@ -144,26 +144,47 @@ class DbTests(unittest.TestCase):
         self.assertNotEqual(result[0].container_no, "BOOKING123")
 
     def test_pending_shipments_only_take_recent_rows_missing_from_headway(self) -> None:
-        config = DbConfig("db.example", 3306, "reader", "secret")
+        source_config = DbConfig("aliyun.example", 3306, "reader", "source-secret")
+        target_config = DbConfig("172.16.48.10", 3306, "writer", "target-secret")
         new_sample = _sample("PG_NEW")
         existing_recent = _sample("PG_EXISTING_RECENT")
         due_sample = _sample("PG_DUE")
 
         with (
-            patch("trace_api_probe.db.fetch_recent_shipments", return_value=[new_sample, existing_recent]),
-            patch("trace_api_probe.db._fetch_due_headway_keys", return_value=["PG_DUE"]),
-            patch("trace_api_probe.db._fetch_shipments_by_consolidation_numbers", return_value=[due_sample]),
+            patch(
+                "trace_api_probe.db.fetch_recent_shipments",
+                return_value=[new_sample, existing_recent],
+            ) as fetch_recent,
+            patch("trace_api_probe.db._fetch_due_headway_keys", return_value=["PG_DUE"]) as fetch_due,
+            patch(
+                "trace_api_probe.db._fetch_shipments_by_consolidation_numbers",
+                return_value=[due_sample],
+            ) as fetch_historical,
             patch(
                 "trace_api_probe.db._fetch_headway_states",
                 return_value={
                     "PG_EXISTING_RECENT": {"is_arrived_destination": 0, "next_query_at": None},
                     "PG_DUE": {"is_arrived_destination": 0, "next_query_at": None},
                 },
-            ),
+            ) as fetch_states,
         ):
-            result = fetch_pending_shipments(config, environment="test", days=60, limit=0)
+            result = fetch_pending_shipments(
+                source_config,
+                target_config,
+                environment="test",
+                days=60,
+                limit=0,
+            )
 
         self.assertEqual([item.consolidation_no for item in result], ["PG_NEW", "PG_DUE"])
+        fetch_recent.assert_called_once_with(source_config, days=60, carrier=None, limit=0)
+        fetch_due.assert_called_once_with(target_config, "test")
+        fetch_historical.assert_called_once_with(source_config, ["PG_DUE"], carrier=None)
+        fetch_states.assert_called_once_with(
+            target_config,
+            "test",
+            ["PG_NEW", "PG_EXISTING_RECENT", "PG_DUE"],
+        )
 
 
 if __name__ == "__main__":

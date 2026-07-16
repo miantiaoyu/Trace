@@ -25,7 +25,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 已验证 HMM 官网新版 Track & Trace：有界 Chromium 可直接按柜号查询，页面 `POST /e-service/general/trackNTrace/selectTrackNTrace.do` 返回追踪 HTML，包含节点、集装箱动态、船名航次与 ETA。
 - `crawler_lab/hmm_probe.py` 使用官网页面生成的 CSRF 表单请求，输出结构化结果表和原始 HTML；同时输出表头与区块识别诊断，柜信息表契约变化时明确失败。HMM 明确不使用无头浏览器。
 
-- 支持按运行环境读取数据库连接配置；Compose 本地默认使用 `test-db.yml`，正式环境必须显式选择 `prod-db.yml`。ERP 源表保持只读，`--persist` 仅写 `oms.headway`。
+- 当前数据库方向固定：使用 `prod-db.yml` 只读查询阿里正式 ERP，使用 `test-db.yml` 写入内网测试 `oms.headway`；不提供测试/正式模式切换。
 - 支持从 `trobs.po_cabinet_combination.cabinet_no` 查询最近 N 天的柜号，按 `update_time DESC, id DESC` 排序并按拼柜号聚合；`shipping_order` 是订舱号，不用于当前柜号追踪。
 - 柜号在路由前统一清理空白、转为大写并校验 ISO 6346 格式及校验位；无效柜号返回 `source_data_error`，不访问船司官网且不写入 `oms.headway`。
 - 支持完整船司字段归一化，已覆盖数据库常见的中英文、简称、BCO/NVO 写法；HMM 对历史乱码后缀使用 `HMM%` 数据库前缀兜底。
@@ -60,8 +60,9 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - `tests/`：单元测试。
 - `requirements.txt`：运行依赖。
 - `.gitignore`：忽略本地敏感配置和 Python 缓存。
-- `prod-db.yml`：本地只读数据库配置文件，必须只读使用，不提交。
-- `Dockerfile`、`docker-compose.yml`：服务器批处理部署定义；数据库配置通过 Compose secret 挂载。
+- `prod-db.yml`：阿里正式 ERP 只读连接配置，不提交。
+- `test-db.yml`：内网测试 `oms.headway` 写入连接配置，不提交。
+- `Dockerfile`、`docker-compose.yml`：服务器批处理部署定义；源和目标数据库配置通过两个 Compose secret 只读挂载。
 - `sql/headway.sql`、`trace_api_probe/headway.py`：头程当前快照表和 upsert 写入逻辑。
 
 ## 当前限制
@@ -75,7 +76,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - HMM 当前必须使用有界浏览器；Linux 服务器需通过 Xvfb 提供虚拟显示器，传 `--headless` 会明确失败。
 - Docker 运行包默认使用非 root 用户、只读根文件系统和资源限制，不暴露 HTTP 端口；Chromium 临时配置写入可写 `/tmp`，状态文件写入独立 Docker volume。
 - 提供 Docker Compose 一次性容器运行方式；完整查询结果不进入调度日志，脱敏指标保存在状态卷。
-- 支持通过 `TRACE_ENV`/`TRACE_DB_CONFIG` 隔离测试与正式数据库配置，兼容简单 key/value 和 Spring `jdbc:mysql://` 数据源格式。
+- 源和目标连接分别使用固定的 `prod-db.yml` 和 `test-db.yml`，兼容简单 key/value 和 Spring `jdbc:mysql://` 数据源格式；不提供命令行或环境变量切换入口。
 - 提供 XXL-JOB `SHELL` 任务 wrapper，测试环境可由统一调度平台调用 Docker 批处理，不要求 Python 进程注册为 Java executor。
 - 测试配置模板使用 `oms` 数据库；`--persist` 模式按拼柜号 upsert `oms.headway`，不写 ERP 源表。
 - 无效柜号返回 `source_data_error`，未适配船司返回 `route_unavailable`，无法识别船司返回 `unsupported_carrier`；三者计入 `skipped`，保留在本轮报告和逐条诊断日志中，但不写入 `oms.headway`。

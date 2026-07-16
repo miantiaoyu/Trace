@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
 from trace_api_probe.carriers import Carrier, parse_carrier
-from trace_api_probe.config import read_db_config
+from trace_api_probe.config import DbConfig, read_db_config
 from trace_api_probe.db import ShipmentSample, fetch_pending_shipments, fetch_recent_shipments
 from trace_api_probe.headway import persist_headway
 from trace_api_probe.result_status import PARTIAL_STATUSES, SKIPPED_STATUSES, SUCCESS_STATUSES
@@ -15,17 +14,16 @@ from trace_api_probe.runtime import DetailRecorder, RunLock, RunRecorder
 from trace_api_probe.tracking import TrackingOptions, query_samples
 
 
+_CONTAINER_SOURCE_CONFIG = Path("/run/secrets/source-db.yml")
+_CONTAINER_TARGET_CONFIG = Path("/run/secrets/target-db.yml")
+_LOCAL_SOURCE_CONFIG = Path("prod-db.yml")
+_LOCAL_TARGET_CONFIG = Path("test-db.yml")
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="从只读库读取最近订单并按船司查询柜号轨迹")
+    parser = argparse.ArgumentParser(description="从阿里正式 ERP 读取订单并将轨迹写入内网 headway")
     parser.add_argument("--carrier", help="只查询指定船司；不传则查询最近订单中的全部船司")
     parser.add_argument("--container", help="手动指定柜号；必须同时传 --carrier")
-    parser.add_argument(
-        "--environment",
-        choices=("test", "prod"),
-        default=None,
-        help="运行环境，默认读取 TRACE_ENV 或 prod；用于选择 test-db.yml/prod-db.yml",
-    )
-    parser.add_argument("--db-config", help="只读数据库配置文件路径；传入后优先于环境默认路径")
     parser.add_argument("--days", type=_positive_int, default=7, help="查询最近多少天，默认 7")
     parser.add_argument(
         "--limit",
@@ -52,18 +50,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--summary-only", action="store_true", help="只输出脱敏查询汇总，不输出柜号和 raw 原始响应")
     parser.add_argument("--persist", action="store_true", help="将最新查询快照写入 oms.headway")
     args = parser.parse_args(argv)
-    environment = args.environment or os.environ.get("TRACE_ENV", "prod")
-    if environment not in {"test", "prod"}:
-        parser.error("TRACE_ENV 必须是 test 或 prod")
-    config_path = Path(args.db_config) if args.db_config else Path(f"{environment}-db.yml")
+    environment = "test"
 
     try:
+        source_config = read_db_config(_fixed_config_path(_CONTAINER_SOURCE_CONFIG, _LOCAL_SOURCE_CONFIG))
+        target_config = read_db_config(_fixed_config_path(_CONTAINER_TARGET_CONFIG, _LOCAL_TARGET_CONFIG))
         with RunLock(Path(args.lock_file), timeout_seconds=args.lock_timeout_seconds):
             carrier = parse_carrier(args.carrier) if args.carrier else None
             samples = _resolve_samples(
                 carrier=carrier,
                 container_no=args.container,
-                config_path=config_path,
+                source_config=source_config,
+                target_config=target_config,
                 environment=environment,
                 persist=args.persist,
                 days=args.days,
@@ -92,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
             report["alerts"] = recorder.record(report)
             if args.persist:
                 report["persistence"] = persist_headway(
-                    read_db_config(config_path),
+                    target_config,
                     environment=environment,
                     samples=samples,
                     results=report["results"],
@@ -111,11 +109,16 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
+def _fixed_config_path(container_path: Path, local_path: Path) -> Path:
+    return container_path if container_path.is_file() else local_path
+
+
 def _resolve_samples(
     *,
     carrier: Carrier | None,
     container_no: str | None,
-    config_path: Path,
+    source_config: DbConfig,
+    target_config: DbConfig,
     environment: str,
     persist: bool,
     days: int,
@@ -134,10 +137,16 @@ def _resolve_samples(
             )
         ]
 
-    db_config = read_db_config(config_path)
     if persist:
-        return fetch_pending_shipments(db_config, environment=environment, days=days, carrier=carrier, limit=limit)
-    return fetch_recent_shipments(db_config, days=days, carrier=carrier, limit=limit)
+        return fetch_pending_shipments(
+            source_config,
+            target_config,
+            environment=environment,
+            days=days,
+            carrier=carrier,
+            limit=limit,
+        )
+    return fetch_recent_shipments(source_config, days=days, carrier=carrier, limit=limit)
 
 
 def _build_report(
@@ -147,7 +156,7 @@ def _build_report(
     limit: int,
     carrier: Carrier | None,
     options: TrackingOptions,
-    environment: str = "prod",
+    environment: str = "test",
     persist: bool = False,
 ) -> dict[str, object]:
     results = query_samples(samples, options=options)
@@ -158,8 +167,11 @@ def _build_report(
     return {
         "query": {
             "source": "trobs.po_cabinet_combination",
-            "read_only": not persist,
+            "source_environment": "prod",
+            "read_only": True,
             "persist": persist,
+            "target": "oms.headway" if persist else None,
+            "target_environment": environment if persist else None,
             "days": days,
             "limit": limit,
             "carrier": carrier.value if carrier else None,

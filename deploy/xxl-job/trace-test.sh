@@ -4,10 +4,6 @@ set -euo pipefail
 PROJECT_DIR="${TRACE_PROJECT_DIR:-/opt/trace}"
 cd "${PROJECT_DIR}"
 
-# The XXL-JOB shell executor must run on a host with Docker access.
-export TRACE_ENV="${TRACE_ENV:-test}"
-export TRACE_DB_CONFIG="${TRACE_DB_CONFIG:-./test-db.yml}"
-
 if docker compose version >/dev/null 2>&1; then
   compose=(docker compose)
 else
@@ -15,7 +11,6 @@ else
 fi
 
 exec "${compose[@]}" run --rm --no-deps -T trace \
-  --db-config /run/secrets/trace-db.yml \
   --days "${TRACE_DAYS:-60}" \
   --limit "${TRACE_LIMIT:-0}" \
   --lock-file /var/lib/trace/.trace-api-probe.lock \

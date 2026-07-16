@@ -1,19 +1,58 @@
 import unittest
 from tempfile import TemporaryDirectory
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from trace_api_probe.__main__ import _build_report, main
+from trace_api_probe.config import DbConfig
 from trace_api_probe.db import ShipmentSample
 from trace_api_probe.tracking import TrackingOptions
 
 
 class MainReportTests(unittest.TestCase):
+    def test_main_reads_from_source_and_persists_to_target_database(self) -> None:
+        source_config = DbConfig("aliyun.example", 3306, "reader", "source-secret")
+        target_config = DbConfig("172.16.48.10", 3306, "writer", "target-secret")
+        with TemporaryDirectory() as directory:
+            lock_path = Path(directory) / "trace.lock"
+            with (
+                patch(
+                    "trace_api_probe.__main__.read_db_config",
+                    side_effect=[source_config, target_config],
+                ) as read_config,
+                patch("trace_api_probe.__main__._resolve_samples", return_value=[]) as resolve_samples,
+                patch("trace_api_probe.__main__.persist_headway", return_value={}) as persist,
+                patch("trace_api_probe.__main__._print_json"),
+            ):
+                exit_code = main(
+                    [
+                        "--lock-file",
+                        str(lock_path),
+                        "--persist",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            read_config.call_args_list,
+            [call(Path("prod-db.yml")), call(Path("test-db.yml"))],
+        )
+        self.assertIs(resolve_samples.call_args.kwargs["source_config"], source_config)
+        self.assertIs(resolve_samples.call_args.kwargs["target_config"], target_config)
+        self.assertIs(persist.call_args.args[0], target_config)
+
     def test_main_returns_success_when_every_result_is_skipped(self) -> None:
         samples = [ShipmentSample(1, "HMM", "INVALID", None, None)]
         with TemporaryDirectory() as directory:
             lock_path = Path(directory) / "trace.lock"
             with (
+                patch(
+                    "trace_api_probe.__main__.read_db_config",
+                    side_effect=[
+                        DbConfig("aliyun.example", 3306, "reader", "source-secret"),
+                        DbConfig("172.16.48.10", 3306, "writer", "target-secret"),
+                    ],
+                ),
                 patch("trace_api_probe.__main__._resolve_samples", return_value=samples),
                 patch(
                     "trace_api_probe.__main__.query_samples",

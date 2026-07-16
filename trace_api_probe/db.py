@@ -87,7 +87,8 @@ def fetch_recent_shipments(
 
 
 def fetch_pending_shipments(
-    config: DbConfig,
+    source_config: DbConfig,
+    target_config: DbConfig,
     *,
     environment: str,
     days: int = 7,
@@ -95,12 +96,16 @@ def fetch_pending_shipments(
     limit: int = 20,
 ) -> list[ShipmentSample]:
     """返回新拼柜号及尚未在最终卸船港完成的到期记录。"""
-    recent_candidates = fetch_recent_shipments(config, days=days, carrier=carrier, limit=0)
-    pending_keys = _fetch_due_headway_keys(config, environment)
+    recent_candidates = fetch_recent_shipments(source_config, days=days, carrier=carrier, limit=0)
+    pending_keys = _fetch_due_headway_keys(target_config, environment)
     pending_key_set = set(pending_keys)
-    historical_candidates = _fetch_shipments_by_consolidation_numbers(config, pending_keys, carrier=carrier)
+    historical_candidates = _fetch_shipments_by_consolidation_numbers(source_config, pending_keys, carrier=carrier)
     candidates = _merge_samples(recent_candidates, historical_candidates)
-    states = _fetch_headway_states(config, environment, [sample.consolidation_no for sample in candidates])
+    states = _fetch_headway_states(
+        target_config,
+        environment,
+        [sample.consolidation_no for sample in candidates],
+    )
     pending = []
     for sample in candidates:
         key = sample.consolidation_no

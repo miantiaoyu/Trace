@@ -10,14 +10,14 @@ Trace 是一个船司 Track & Trace 查询工具。它从 ERP 源表读取拼柜
 
 ```text
 本机开发
-  └─ Python 或 Docker 手动运行 ──> 测试数据库 oms（读 ERP，写 headway）
+  └─ Python 或 Docker 手动运行 ──> 阿里正式 ERP（只读）+ 内网测试 oms.headway（写入）
 
 代码仓库 ──MR/CI 构建镜像──> 镜像仓库
                               │
                               └─服务器拉取固定镜像
                                    └─XXL-JOB SHELL/Python 任务
                                         └─Docker 容器
-                                             ├─读取测试或正式 oms 配置
+                                             ├─固定读阿里正式 ERP、写内网测试 oms.headway
                                              └─访问船司官网并输出报告
 ```
 
@@ -38,9 +38,10 @@ python -m playwright install chromium
 
 ```text
 prod-db.yml
+test-db.yml
 ```
 
-该文件保存测试/正式数据库连接信息，不应修改或提交；ERP 源表只读，`--persist` 仅写 `oms.headway`。
+当前运行链路固定使用 `prod-db.yml` 只读查询阿里正式 ERP，使用 `test-db.yml` 写入内网测试 `oms.headway`。两个文件都不应提交。
 
 ## 启动/使用
 
@@ -84,14 +85,14 @@ xvfb-run -a python -m trace_api_probe --carrier HMM --days 7 --limit 1
 
 项目提供了包含 Python、Playwright Chromium、Xvfb 和系统字体的镜像。它是一次性批处理容器，不是 HTTP 服务，不需要开放端口。镜像默认通过 Xvfb 启动，因此 HMM 和万海的有界浏览器路线可以直接运行。
 
-在本机或测试服务器准备 Docker Engine 和 Compose plugin 后，将本仓库与未提交的 `test-db.yml` 放在同一目录，执行：
+在本机或测试服务器准备 Docker Engine 和 Compose plugin 后，将本仓库与未提交的 `prod-db.yml`、`test-db.yml` 放在同一目录，执行：
 
 ```bash
 docker compose build
 docker compose run --rm trace
 ```
 
-数据库配置通过 `TRACE_DB_CONFIG` 选择，并只作为 Compose secret 以只读方式挂载到容器，不会复制进镜像。Compose 默认使用测试环境和 `./test-db.yml`；正式运行必须显式设置 `TRACE_ENV=prod` 与 `TRACE_DB_CONFIG=./prod-db.yml`。容器默认使用非 root 用户、只读根文件系统、独立临时文件系统、禁止提权、丢弃 Linux capabilities，并限制 1 GiB 内存和 256 个进程。Chromium 的临时用户配置写入 `/tmp/trace-browser-config`，不会进入镜像或状态卷。脱敏运行日志、连续失败状态和任务锁保存在 Docker volume `trace_state` 中；不需要状态时可以用 `docker compose down -v` 清理。
+Compose 固定挂载两个只读 secret：`prod-db.yml` 作为 `source_db`，只查询阿里正式库 `trobs.po_cabinet_combination`；`test-db.yml` 作为 `target_db`，只写内网测试库 `oms.headway`。命令行参数和环境变量都不能交换这两个连接；凭据不会复制进镜像。容器默认使用非 root 用户、只读根文件系统、独立临时文件系统、禁止提权、丢弃 Linux capabilities，并限制 1 GiB 内存和 256 个进程。Chromium 的临时用户配置写入 `/tmp/trace-browser-config`，不会进入镜像或状态卷。脱敏运行日志、连续失败状态和任务锁保存在 Docker volume `trace_state` 中；不需要状态时可以用 `docker compose down -v` 清理。
 
 默认命令查询最近 7 天最多 20 个柜号。临时联调可以覆盖参数，例如：
 
@@ -101,9 +102,9 @@ docker compose run --rm trace --carrier MSC --headless --limit 1
 docker compose run --rm trace --container HMMU4706485 --carrier HMM
 ```
 
-### 测试/正式环境隔离
+### 当前固定数据库方向
 
-Compose 默认使用测试配置。测试服务器上复制 `test-db.yml.example` 为 `test-db.yml` 并填入测试库密码：
+内网目标配置可从模板创建：
 
 ```bash
 cp test-db.yml.example test-db.yml
@@ -111,16 +112,9 @@ chmod 600 test-db.yml
 docker compose run --rm trace --summary-only --limit 1
 ```
 
-正式环境使用独立的 `prod-db.yml`，不能从测试服务器复制，并且必须显式选择正式环境：
-
-```bash
-TRACE_ENV=prod TRACE_DB_CONFIG=./prod-db.yml \
-  docker compose run --rm trace --summary-only --limit 1
-```
-
 程序也支持现有 Spring 风格的 `url`、`username`、`password` 配置，并会从 `jdbc:mysql://` URL 解析主机和端口。
 
-测试配置中的数据库名是 `oms`。正式配置仍使用独立的 `prod-db.yml`，两者不共享文件、不共享 Docker secret。
+当前不提供测试/正式运行模式切换。上线前需要单独评审并把 `target_db` 改为正式 `oms` 配置；`source_db` 仍保持阿里正式 ERP 只读连接。
 
 ### 结果落库
 
@@ -133,9 +127,7 @@ mysql --host 172.16.48.10 --port 3306 --user root --password oms < sql/headway.s
 查询但不写入结果表时，不传 `--persist`。定时任务需要写入最新快照时传入：
 
 ```bash
-TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml \
-  docker compose run --rm trace \
-  --db-config /run/secrets/trace-db.yml \
+docker compose run --rm trace \
   --days 60 \
   --limit 0 \
   --lock-file /var/lib/trace/.trace-api-probe.lock \
@@ -163,34 +155,33 @@ XXL-JOB 页面里的“执行器”是“哪台机器可以接收并执行任务
 /opt/trace/deploy/xxl-job/trace-test.sh
 ```
 
-脚本默认选择 `test-db.yml`，写入 `oms.headway` 并只输出脱敏汇总；它返回真实退出码：只有成功或跳过时为 0，出现部分成功或真实失败时为 1。测试时可以手动执行同一个脚本验证：
+脚本固定读取 `prod-db.yml` 中的阿里正式 ERP，写入 `test-db.yml` 中的内网测试 `oms.headway`，并只输出脱敏汇总；它返回真实退出码：只有成功或跳过时为 0，出现部分成功或真实失败时为 1。测试时可以手动执行同一个脚本验证：
 
 ```bash
 cd /opt/trace
-TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml ./deploy/xxl-job/trace-test.sh
+./deploy/xxl-job/trace-test.sh
 ```
 
 XXL-JOB 的 `appname: unify-executors` 是现有 Java executor 的标识，不要让 Python/Docker 任务复用同一个 appname，除非公司管理员明确要求它们运行在同一 executor 主机上。若后续必须让 Python 自己出现在 XXL-JOB 的执行器列表中，再单独实现 Python HTTP executor，并使用独立的 `trace-test-executors` appname 和端口；这不是当前测试接入的必要条件。
 
 ### 本机测试到正式发布
 
-建议把“环境选择”放在部署配置里，而不是写死在代码中：
+当前联调阶段固定数据库方向：
 
 ```text
-本机分支/工作区       TRACE_ENV=test + test-db.yml + Docker
+本机分支/工作区       阿里正式 ERP（只读）+ 内网测试 oms（写入）+ Docker
         │
         └─提交 MR
              └─CI：单元测试 → Docker build → 镜像安全扫描 → 发布 test 标签
                                   │
-                                  └─测试服务器/XXL-JOB 使用 test 标签和 oms
+                                  └─测试服务器/XXL-JOB 使用同一固定数据库方向
 
 MR 合并到主分支
         └─CI：构建同一份镜像 → 推送正式版本标签
-             └─正式服务器人工批准/发布
-                  └─TRACE_ENV=prod + prod-db.yml + 正式 XXL-JOB 任务
+             └─正式服务器人工批准前，单独切换 target_db 为正式 oms
 ```
 
-关键点是“同一份已构建镜像晋级”，而不是在正式服务器重新 `git pull` 和重新安装依赖。测试/正式差异只应来自 secret、环境变量、XXL-JOB 任务和镜像标签。具体 CI 平台、镜像仓库地址、审批节点和 XXL-JOB Python 插件需要公司管理员提供，仓库无法凭空推断。
+关键点是“同一份已构建镜像晋级”，而不是在正式服务器重新 `git pull` 和重新安装依赖。正式目标库切换必须在上线前单独评审。具体 CI 平台、镜像仓库地址、审批节点和 XXL-JOB Python 插件需要公司管理员提供，仓库无法凭空推断。
 
 生产环境建议使用 XXL-JOB `SHELL` 任务或受控的 CI 定时触发 Docker 一次性容器，并限制服务器出站访问范围；不要把 `prod-db.yml` 写入镜像、提交 Git 或放进公开日志。该容器没有 Web API，若需要浏览器界面或远程调用，应另行设计鉴权层，不要直接把 CLI 暴露到公网。
 
