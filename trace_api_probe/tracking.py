@@ -150,13 +150,6 @@ class TrackingRouter:
         if sample.source_error:
             result.update(status="source_data_error", route="source_validation", error=sample.source_error)
             return result
-        if carrier is None:
-            result.update(
-                status="unsupported_carrier",
-                route="unknown",
-                error=f"无法识别数据库船司: {sample.shipping_company}",
-            )
-            return result
 
         try:
             container_no = normalize_container_number(sample.container_no)
@@ -164,6 +157,14 @@ class TrackingRouter:
             result.update(status="source_data_error", route="source_validation", error=str(exc))
             return result
         result["container"] = container_no
+
+        if carrier is None:
+            result.update(
+                status="unsupported_carrier",
+                route="unknown",
+                error=f"无法识别数据库船司: {sample.shipping_company}",
+            )
+            return result
 
         route = self._routes.get(carrier)
         result.update(carrier=carrier.value)

@@ -27,6 +27,12 @@ class TrackingRouterTests(unittest.TestCase):
         self.assertEqual(result["route"], "source_validation")
         self.assertEqual(calls, [])
 
+    def test_invalid_container_takes_precedence_over_unknown_carrier(self) -> None:
+        result = TrackingRouter().query(sample("未知船司", "INVALID"))
+
+        self.assertEqual(result["status"], "source_data_error")
+        self.assertEqual(result["route"], "source_validation")
+
     def test_routes_sample_and_keeps_raw_payload(self) -> None:
         routes = {
             Carrier.YANG_MING: CarrierRoute("fake", "测试路线", lambda container, options: {"events": [container]})
@@ -61,7 +67,7 @@ class TrackingRouterTests(unittest.TestCase):
         self.assertEqual(result["status"], "route_unavailable")
 
     def test_unknown_carrier_is_reported_as_data(self) -> None:
-        result = TrackingRouter().query(sample("未知船司", "ABCU1234567"))
+        result = TrackingRouter().query(sample("未知船司", "EGHU9204414"))
 
         self.assertEqual(result["status"], "unsupported_carrier")
         self.assertIsNone(result["carrier"])

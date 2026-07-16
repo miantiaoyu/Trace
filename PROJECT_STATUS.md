@@ -50,7 +50,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 
 - Python 命令行工具。
 - 运行依赖：`PyMySQL`、`Playwright`、`Pydantic`、`filelock`、`Selectolax`。
-- 测试使用 Python 标准库 `unittest`。
+- 测试使用 Python 标准库 `unittest`，覆盖任务锁、ISO 6346 柜号校验、跳过状态、脱敏日志、连续失败告警、指数退避和随机抖动。
 - 支持用户本机 Conda `py312` 环境，也提供包含 Chromium 与 Xvfb 的 Docker/Compose 运行包。
 
 ## 关键目录/文件
@@ -83,8 +83,6 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 
 ## 最近验证
 
-- 2026-07-16 定位并修复 Docker 只读根文件系统下 Chromium Crashpad 无法创建配置目录的问题；在相同安全限制与 Xvfb 下，有界 Chromium 可正常启动，HMM `HMMU4706485` 查询成功。
-- 2026-07-16 核对 ERP 字段：`cabinet_no` 为柜号，`shipping_order` 为订舱号；测试库多数记录是占位数据，正式配置近 60 天 `cabinet_no` 有 617 条标准格式柜号。
 - 最近 7 天真实样本已成功验证：阳明、COSCO、ONE、马士基、HMM。
 - SM Line、长荣、MSC、万海在该时间窗口无可用样本，未计为失败。
 - 2026-07-14 对 3 个马士基真实样本核对了 JSON 顶层、柜、地点和事件字段，结构一致；事件同时包含 `ACTUAL` 与 `EXPECTED`。
@@ -94,7 +92,6 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 2026-07-14 完成已接入船司的运输阶段样本验证，结果记录于 `TRACKING_STAGE_VALIDATION_REPORT.md`。马士基、HMM、ONE、COSCO、阳明、MSC 覆盖发船前、在途和已到目的地；长荣缺发船前样本，万海缺发船前和明确在途样本，SM Line 仅有一个发船前数据库样本。
 - 阶段验证期间补齐万海数据库别名、柜号内部空格清理、ONE Actual/Estimated 与上下文继承、COSCO 制表符拆分、阳明 DCSA 事件映射及过期预计节点过滤。
 - 2026-07-14 完成 Selectolax 迁移后的官网回归：HMM 返回 9 张表并提取 2 个事件，长荣返回 1 条结果行，万海有界模式返回 1 条最新状态；统一摘要均通过 Pydantic schema `1.1` 校验。
-- 2026-07-16 完成运行时加固验收：83 项单元测试通过，任务锁、ISO 6346 柜号校验、跳过状态、脱敏日志、连续失败告警、指数退避和随机抖动均有自动化测试覆盖。
 
 ## 90 天订单基线
 
