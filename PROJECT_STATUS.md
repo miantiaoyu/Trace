@@ -26,6 +26,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - `crawler_lab/hmm_probe.py` 使用官网页面生成的 CSRF 表单请求，输出结构化结果表和原始 HTML；同时输出表头与区块识别诊断，柜信息表契约变化时明确失败。HMM 明确不使用无头浏览器。
 
 - 当前数据库方向固定：使用 `prod-db.yml` 只读查询阿里正式 ERP，使用 `test-db.yml` 写入内网测试 `oms.headway`；不提供测试/正式模式切换。
+- `oms.headway` 建表定义已包含表备注和全部字段的中文备注；已建表可通过 `sql/headway_add_comments.sql` 只补充备注。
 - 支持从 `trobs.po_cabinet_combination.cabinet_no` 查询最近 N 天的柜号，按 `update_time DESC, id DESC` 排序并按拼柜号聚合；`shipping_order` 是订舱号，不用于当前柜号追踪。
 - 柜号在路由前统一清理空白、转为大写并校验 ISO 6346 格式及校验位；无效柜号返回 `source_data_error`，不访问船司官网且不写入 `oms.headway`。
 - 支持完整船司字段归一化，已覆盖数据库常见的中英文、简称、BCO/NVO 写法；HMM 对历史乱码后缀使用 `HMM%` 数据库前缀兜底。
@@ -63,7 +64,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - `prod-db.yml`：阿里正式 ERP 只读连接配置，不提交。
 - `test-db.yml`：内网测试 `oms.headway` 写入连接配置，不提交。
 - `Dockerfile`、`docker-compose.yml`：服务器批处理部署定义；源和目标数据库配置通过两个 Compose secret 只读挂载。
-- `sql/headway.sql`、`trace_api_probe/headway.py`：头程当前快照表和 upsert 写入逻辑。
+- `sql/headway.sql`、`sql/headway_add_comments.sql`、`trace_api_probe/headway.py`：头程当前快照表、已建表备注补齐脚本和 upsert 写入逻辑。
 
 ## 当前限制
 

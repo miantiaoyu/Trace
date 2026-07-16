@@ -14,6 +14,7 @@
 - 在本机 Docker 环境先完成“两个月新单窗口 + 不限制数量”的测试库落库回归，确认 `oms.headway` 字段映射、任务锁、脱敏运行日志和船司连续失败状态。
 - 在测试环境通过 XXL-JOB `SHELL` 任务调用 Docker wrapper，验证 XXL 重试、退出码和脱敏任务日志。
 - 正式上线前单独评审目标数据库权限与配置，将 `target_db` 从内网测试 `oms` 切换为正式 `oms`，保持阿里 ERP 源连接只读。
+- 在测试库低峰期执行 `sql/headway_add_comments.sql`，并用 `SHOW FULL COLUMNS` 确认表和全部字段的中文备注已生效。
 - 验证统一 JSON 到 `oms.headway` 字段的映射和目的港实际卸船判定，不写 ERP 源表。
 - 在测试库 `oms` 回归稳定后，单独评审结果落库方案；未经字段、权限和保留周期确认，不创建写入表。
 - 当单轮规模超过约 200 个柜或需要任务断点恢复时，再评估引入 Crawlee 持久队列；当前规模不进行框架迁移。
@@ -39,6 +40,7 @@
 - ERP 源表只读；`--persist` 只对 `oms.headway` 执行受控 upsert。
 - Docker/XXL-JOB 运行日志不保存柜号或官网原始响应，脱敏指标可以独立查看。
 - 联调任务只读阿里正式 ERP，只向内网测试 `oms.headway` 写入；命令行和环境变量不能反转读写方向。
+- `SHOW FULL COLUMNS FROM oms.headway` 显示所有字段备注非空，且表中原有数据条数与内容不变。
 
 ## 建议实现步骤
 

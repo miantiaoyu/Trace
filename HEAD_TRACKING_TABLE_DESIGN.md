@@ -1,6 +1,6 @@
 # 头程追踪表设计草案
 
-本文描述 `oms.headway` 的数据模型和查询流程；建表 SQL 位于 `sql/headway.sql`。
+本文描述 `oms.headway` 的数据模型和查询流程；建表 SQL 位于 `sql/headway.sql`，已建表的备注补齐脚本位于 `sql/headway_add_comments.sql`。
 
 ## 设计目标
 

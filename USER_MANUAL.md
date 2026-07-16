@@ -124,6 +124,19 @@ docker compose run --rm trace --summary-only --limit 1
 mysql --host 172.16.48.10 --port 3306 --user root --password oms < sql/headway.sql
 ```
 
+如果 `headway` 表已经创建，只需在低峰期执行备注补齐脚本：
+
+```bash
+mysql --host 172.16.48.10 --port 3306 --user root --password oms < sql/headway_add_comments.sql
+```
+
+该脚本不删除、不更新业务数据，但 MySQL 执行 `ALTER TABLE` 时可能短暂锁表。执行后可用以下命令查看字段备注：
+
+```bash
+mysql --host 172.16.48.10 --port 3306 --user root --password --database oms \
+  --execute "SHOW FULL COLUMNS FROM headway;"
+```
+
 查询但不写入结果表时，不传 `--persist`。定时任务需要写入最新快照时传入：
 
 ```bash
