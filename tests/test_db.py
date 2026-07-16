@@ -121,6 +121,7 @@ class DbTests(unittest.TestCase):
                     "id": 4,
                     "shipping_company": "EMC 长荣",
                     "cabinet_no": " EGHU 9204414 ",
+                    "shipping_order": "BOOKING123",
                     "cabinet_combination_number": "PG20260713003",
                     "update_time": "2026-07-13",
                     "create_time": None,
@@ -140,6 +141,7 @@ class DbTests(unittest.TestCase):
             )
 
         self.assertEqual(result[0].container_no, "EGHU9204414")
+        self.assertNotEqual(result[0].container_no, "BOOKING123")
 
     def test_pending_shipments_only_take_recent_rows_missing_from_headway(self) -> None:
         config = DbConfig("db.example", 3306, "reader", "secret")

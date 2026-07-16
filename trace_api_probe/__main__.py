@@ -10,6 +10,7 @@ from trace_api_probe.carriers import Carrier, parse_carrier
 from trace_api_probe.config import read_db_config
 from trace_api_probe.db import ShipmentSample, fetch_pending_shipments, fetch_recent_shipments
 from trace_api_probe.headway import persist_headway
+from trace_api_probe.result_status import PARTIAL_STATUSES, SKIPPED_STATUSES, SUCCESS_STATUSES
 from trace_api_probe.runtime import DetailRecorder, RunLock, RunRecorder
 from trace_api_probe.tracking import TrackingOptions, query_samples
 
@@ -150,9 +151,10 @@ def _build_report(
     persist: bool = False,
 ) -> dict[str, object]:
     results = query_samples(samples, options=options)
-    success = sum(result["status"] == "success" for result in results)
-    partial = sum(result["status"] == "partial_success" for result in results)
-    failed = len(results) - success - partial
+    success = sum(result["status"] in SUCCESS_STATUSES for result in results)
+    partial = sum(result["status"] in PARTIAL_STATUSES for result in results)
+    skipped = sum(result["status"] in SKIPPED_STATUSES for result in results)
+    failed = len(results) - success - partial - skipped
     return {
         "query": {
             "source": "trobs.po_cabinet_combination",
@@ -164,7 +166,13 @@ def _build_report(
             "environment": environment,
             "count": len(samples),
         },
-        "summary": {"total": len(results), "success": success, "partial": partial, "failed": failed},
+        "summary": {
+            "total": len(results),
+            "success": success,
+            "partial": partial,
+            "skipped": skipped,
+            "failed": failed,
+        },
         "results": results,
     }
 

@@ -25,8 +25,9 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 已验证 HMM 官网新版 Track & Trace：有界 Chromium 可直接按柜号查询，页面 `POST /e-service/general/trackNTrace/selectTrackNTrace.do` 返回追踪 HTML，包含节点、集装箱动态、船名航次与 ETA。
 - `crawler_lab/hmm_probe.py` 使用官网页面生成的 CSRF 表单请求，输出结构化结果表和原始 HTML；同时输出表头与区块识别诊断，柜信息表契约变化时明确失败。HMM 明确不使用无头浏览器。
 
-- 支持从根目录 `prod-db.yml` 读取数据库连接配置；ERP 源表保持只读，`--persist` 仅写 `oms.headway`。
-- 支持从 `trobs.po_cabinet_combination` 查询最近 N 天的有效柜号，按 `update_time DESC, id DESC` 排序并按柜号去重。
+- 支持按运行环境读取数据库连接配置；Compose 本地默认使用 `test-db.yml`，正式环境必须显式选择 `prod-db.yml`。ERP 源表保持只读，`--persist` 仅写 `oms.headway`。
+- 支持从 `trobs.po_cabinet_combination.cabinet_no` 查询最近 N 天的柜号，按 `update_time DESC, id DESC` 排序并按拼柜号聚合；`shipping_order` 是订舱号，不用于当前柜号追踪。
+- 柜号在路由前统一清理空白、转为大写并校验 ISO 6346 格式及校验位；无效柜号返回 `source_data_error`，不访问船司官网且不写入 `oms.headway`。
 - 支持完整船司字段归一化，已覆盖数据库常见的中英文、简称、BCO/NVO 写法；HMM 对历史乱码后缀使用 `HMM%` 数据库前缀兜底。
 - 统一入口按船司路线执行最低访问间隔、硬超时和有限重试；每次查询在独立 Provider 子进程中运行，超时会终止该次进程，避免浏览器和网络请求残留。查询、路由和归一化均按单柜隔离，单条异常不会终止整个批次。
 - 统一摘要由 Pydantic 数据契约校验，当前 schema 为 `1.2`；新增实际出发时间、最终卸船港和目的港实际卸船标志，未知字段和非法类型会在归一化边界明确失败。
@@ -34,7 +35,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 瞬时故障重试采用指数退避与随机抖动，并同时遵守同船司最小访问间隔；执行元数据保留每次重试等待时长。
 - HMM、长荣和万海的 HTML 表格统一由 Selectolax 容错解析，仍以表头、柜号回显和关键区块作为页面契约，不依赖表格序号或视觉坐标。
 - 输出同时保留 `raw` 原始返回和 `normalized` 固定摘要。已接入的阳明、SM Line、长荣、COSCO、ONE、马士基、MSC、万海、HMM 均有统一事件映射；来源能区分时输出 `ACTUAL/EXPECTED`，并分别计算 `current` 与 `next_expected`。
-- 归一化异常返回 `partial_success` 并保留原始数据；未预期路由异常返回 `internal_error`。报告汇总分别统计成功、部分成功和失败。
+- 归一化异常返回 `partial_success` 并保留原始数据；未预期路由异常返回 `internal_error`。报告汇总分别统计成功、部分成功、跳过和失败；纯跳过轮次不增加连续失败次数。
 - 新增 `trace_api_probe/tracking.py` 统一路由模块：
   - 阳明、SM Line、长荣、COSCO、ONE、马士基、MSC、万海、HMM 进入已验证路线。
   - CMA CGM、OOCL、ZIM、TS Lines、Hapag-Lloyd、KMTC、SeaLead、APL 返回明确的路线不可用状态。
@@ -72,16 +73,18 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 万海当前走的是“标准浏览器预热 + 官网表单 POST”路径，不依赖维运网，也不绕过官网校验脚本；但新站 `cec` 入口和 Booking/B/L 弹窗 redirect 页在当前环境仍不适合作为直接抓取入口。
 - 万海在 2026-07-14 的真实回归中有界模式成功，无头模式停留在官网入口校验页；Linux 服务器运行万海时也应通过 Xvfb 提供虚拟显示器。
 - HMM 当前必须使用有界浏览器；Linux 服务器需通过 Xvfb 提供虚拟显示器，传 `--headless` 会明确失败。
-- Docker 运行包默认使用非 root 用户、只读根文件系统和资源限制，不暴露 HTTP 端口；状态文件写入独立 Docker volume。
+- Docker 运行包默认使用非 root 用户、只读根文件系统和资源限制，不暴露 HTTP 端口；Chromium 临时配置写入可写 `/tmp`，状态文件写入独立 Docker volume。
 - 提供 Docker Compose 一次性容器运行方式；完整查询结果不进入调度日志，脱敏指标保存在状态卷。
 - 支持通过 `TRACE_ENV`/`TRACE_DB_CONFIG` 隔离测试与正式数据库配置，兼容简单 key/value 和 Spring `jdbc:mysql://` 数据源格式。
 - 提供 XXL-JOB `SHELL` 任务 wrapper，测试环境可由统一调度平台调用 Docker 批处理，不要求 Python 进程注册为 Java executor。
 - 测试配置模板使用 `oms` 数据库；`--persist` 模式按拼柜号 upsert `oms.headway`，不写 ERP 源表。
-- 未适配船司返回 `route_unavailable`，无法识别船司返回 `unsupported_carrier`，二者保留在本轮报告和逐条诊断日志中，但不写入 `oms.headway`。
+- 无效柜号返回 `source_data_error`，未适配船司返回 `route_unavailable`，无法识别船司返回 `unsupported_carrier`；三者计入 `skipped`，保留在本轮报告和逐条诊断日志中，但不写入 `oms.headway`。
 - 支持 `--detail-log` 写入逐条 JSONL 诊断日志，记录样本、路线、错误摘要、核心字段缺失和写库决策；不保存官网 raw 原始响应。
 
 ## 最近验证
 
+- 2026-07-16 定位并修复 Docker 只读根文件系统下 Chromium Crashpad 无法创建配置目录的问题；在相同安全限制与 Xvfb 下，有界 Chromium 可正常启动，HMM `HMMU4706485` 查询成功。
+- 2026-07-16 核对 ERP 字段：`cabinet_no` 为柜号，`shipping_order` 为订舱号；测试库多数记录是占位数据，正式配置近 60 天 `cabinet_no` 有 617 条标准格式柜号。
 - 最近 7 天真实样本已成功验证：阳明、COSCO、ONE、马士基、HMM。
 - SM Line、长荣、MSC、万海在该时间窗口无可用样本，未计为失败。
 - 2026-07-14 对 3 个马士基真实样本核对了 JSON 顶层、柜、地点和事件字段，结构一致；事件同时包含 `ACTUAL` 与 `EXPECTED`。
@@ -91,7 +94,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 2026-07-14 完成已接入船司的运输阶段样本验证，结果记录于 `TRACKING_STAGE_VALIDATION_REPORT.md`。马士基、HMM、ONE、COSCO、阳明、MSC 覆盖发船前、在途和已到目的地；长荣缺发船前样本，万海缺发船前和明确在途样本，SM Line 仅有一个发船前数据库样本。
 - 阶段验证期间补齐万海数据库别名、柜号内部空格清理、ONE Actual/Estimated 与上下文继承、COSCO 制表符拆分、阳明 DCSA 事件映射及过期预计节点过滤。
 - 2026-07-14 完成 Selectolax 迁移后的官网回归：HMM 返回 9 张表并提取 2 个事件，长荣返回 1 条结果行，万海有界模式返回 1 条最新状态；统一摘要均通过 Pydantic schema `1.1` 校验。
-- 2026-07-14 完成运行时加固验收：67 项单元测试通过，任务锁、脱敏日志、连续失败告警、指数退避和随机抖动均有自动化测试覆盖。
+- 2026-07-16 完成运行时加固验收：83 项单元测试通过，任务锁、ISO 6346 柜号校验、跳过状态、脱敏日志、连续失败告警、指数退避和随机抖动均有自动化测试覆盖。
 
 ## 90 天订单基线
 

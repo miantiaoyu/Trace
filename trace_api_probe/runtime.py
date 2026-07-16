@@ -8,6 +8,8 @@ from typing import Mapping, Sequence
 
 from filelock import FileLock, Timeout
 
+from trace_api_probe.result_status import PARTIAL_STATUSES, SKIPPED_STATUSES, SUCCESS_STATUSES
+
 
 class RunAlreadyActiveError(RuntimeError):
     pass
@@ -71,12 +73,17 @@ class RunRecorder:
                 continue
             previous = carrier_state.get(carrier, {})
             streak = int(previous.get("consecutive_failed_runs", 0)) if isinstance(previous, Mapping) else 0
-            streak = 0 if int(metrics.get("success", 0)) > 0 else streak + 1
+            has_success = int(metrics.get("success", 0)) > 0
+            has_failure = int(metrics.get("failed", 0)) > 0 or int(metrics.get("partial", 0)) > 0
+            if has_success:
+                streak = 0
+            elif has_failure:
+                streak += 1
             carrier_state[str(carrier)] = {
                 "consecutive_failed_runs": streak,
                 "updated_at": _utc_now(),
             }
-            if streak >= self._alert_threshold:
+            if has_failure and streak >= self._alert_threshold:
                 alerts.append(
                     {
                         "carrier": str(carrier),
@@ -150,9 +157,13 @@ def _sanitized_entry(report: Mapping[str, object]) -> dict[str, object]:
                     elapsed.append(float(value))
         carriers[carrier] = {
             "total": len(rows),
-            "success": statuses.get("success", 0),
-            "partial": statuses.get("partial_success", 0),
-            "failed": len(rows) - statuses.get("success", 0) - statuses.get("partial_success", 0),
+            "success": sum(statuses.get(status, 0) for status in SUCCESS_STATUSES),
+            "partial": sum(statuses.get(status, 0) for status in PARTIAL_STATUSES),
+            "skipped": sum(statuses.get(status, 0) for status in SKIPPED_STATUSES),
+            "failed": len(rows)
+            - sum(statuses.get(status, 0) for status in SUCCESS_STATUSES)
+            - sum(statuses.get(status, 0) for status in PARTIAL_STATUSES)
+            - sum(statuses.get(status, 0) for status in SKIPPED_STATUSES),
             "attempts": attempts,
             "retries": max(0, attempts - len(rows)),
             "average_elapsed_seconds": round(sum(elapsed) / len(elapsed), 3) if elapsed else None,
@@ -226,7 +237,7 @@ def _persistence_decision(sample: object, status: str, *, persist: bool) -> dict
         return {"action": "not_requested"}
     if not getattr(sample, "consolidation_no", None):
         return {"action": "skipped", "reason": "missing_consolidation_no"}
-    if status in {"route_unavailable", "unsupported_carrier"}:
+    if status in SKIPPED_STATUSES:
         return {"action": "skipped", "reason": status}
     return {"action": "upsert"}
 

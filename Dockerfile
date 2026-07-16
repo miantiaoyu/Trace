@@ -3,7 +3,8 @@ FROM mcr.microsoft.com/playwright/python:v1.61.0-noble
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    HOME=/home/trace
+    HOME=/home/trace \
+    XDG_CONFIG_HOME=/tmp/trace-browser-config
 
 # HMM and Wan Hai require a headed browser; Xvfb supplies a private display.
 RUN apt-get update \

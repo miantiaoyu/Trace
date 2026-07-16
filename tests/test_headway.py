@@ -42,6 +42,33 @@ class FakeConnection:
 
 
 class HeadwayTests(unittest.TestCase):
+    def test_persist_headway_skips_source_data_errors(self) -> None:
+        cursor = FakeCursor()
+        connection = FakeConnection(cursor)
+        fake_module = types.SimpleNamespace(
+            cursors=types.SimpleNamespace(DictCursor=object),
+            connect=lambda **kwargs: connection,
+        )
+        sample = ShipmentSample(1, "HMM", "INVALID", None, None, "PG20260713004", 1)
+        result = {
+            "status": "source_data_error",
+            "carrier": "HMM",
+            "route": "source_validation",
+            "error": "柜号格式无效",
+        }
+
+        with patch.dict(sys.modules, {"pymysql": fake_module}):
+            summary = persist_headway(
+                DbConfig("db.example", 3306, "writer", "secret"),
+                environment="test",
+                samples=[sample],
+                results=[result],
+            )
+
+        self.assertEqual(summary, {"attempted": 0, "persisted": 0, "skipped": 1})
+        self.assertFalse(connection.committed)
+        self.assertEqual(cursor.calls, [])
+
     def test_build_row_keeps_raw_and_arrival_fields(self) -> None:
         sample = ShipmentSample(1, "HMM", "HMMU0000001", "2026-07-13", None, "PG20260713001", 2)
         result = {

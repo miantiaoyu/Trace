@@ -6,12 +6,11 @@ from typing import Mapping, Sequence
 
 from trace_api_probe.config import DbConfig
 from trace_api_probe.db import ShipmentSample
+from trace_api_probe.result_status import SKIPPED_STATUSES, SUCCESS_STATUSES
 
 
 HEADWAY_TABLE = "`oms`.`headway`"
-SUCCESS_STATUSES = {"success"}
 RAW_SUCCESS_STATUSES = {"success", "partial_success"}
-SKIPPED_STATUSES = {"route_unavailable", "unsupported_carrier"}
 
 
 def persist_headway(

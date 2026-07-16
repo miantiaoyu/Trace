@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Callable, Mapping
 
 from trace_api_probe.carriers import Carrier, normalize_carrier
+from trace_api_probe.container_numbers import normalize_container_number
 from trace_api_probe.db import ShipmentSample
 from trace_api_probe.execution import QueryExecutor, QueryPolicy
 from trace_api_probe.normalization import empty_tracking_summary, normalize_tracking
@@ -157,6 +158,13 @@ class TrackingRouter:
             )
             return result
 
+        try:
+            container_no = normalize_container_number(sample.container_no)
+        except ValueError as exc:
+            result.update(status="source_data_error", route="source_validation", error=str(exc))
+            return result
+        result["container"] = container_no
+
         route = self._routes.get(carrier)
         result.update(carrier=carrier.value)
         if route is None or route.adapter is None:
@@ -174,7 +182,7 @@ class TrackingRouter:
             raw, execution = self._executor.execute(
                 carrier.value,
                 route.adapter,
-                sample.container_no,
+                container_no,
                 options,
                 policy,
             )
@@ -192,12 +200,12 @@ class TrackingRouter:
             return result
 
         try:
-            normalized = normalize_tracking(carrier, sample.container_no, raw)
+            normalized = normalize_tracking(carrier, container_no, raw)
         except Exception as exc:
             result.update(
                 status="partial_success",
                 execution=execution,
-                normalized=empty_tracking_summary(carrier, sample.container_no),
+                normalized=empty_tracking_summary(carrier, container_no),
                 raw=raw,
                 error={
                     "stage": "normalization",

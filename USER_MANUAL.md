@@ -84,14 +84,14 @@ xvfb-run -a python -m trace_api_probe --carrier HMM --days 7 --limit 1
 
 项目提供了包含 Python、Playwright Chromium、Xvfb 和系统字体的镜像。它是一次性批处理容器，不是 HTTP 服务，不需要开放端口。镜像默认通过 Xvfb 启动，因此 HMM 和万海的有界浏览器路线可以直接运行。
 
-在服务器上准备 Docker Engine 和 Compose plugin 后，将本仓库与未提交的 `prod-db.yml` 放在同一目录，执行：
+在本机或测试服务器准备 Docker Engine 和 Compose plugin 后，将本仓库与未提交的 `test-db.yml` 放在同一目录，执行：
 
 ```bash
 docker compose build
 docker compose run --rm trace
 ```
 
-数据库配置通过 `TRACE_DB_CONFIG` 选择，并只作为 Compose secret 以只读方式挂载到容器，不会复制进镜像。默认使用 `./prod-db.yml`；测试环境应设置为 `./test-db.yml`。容器默认使用非 root 用户、只读根文件系统、独立临时文件系统、禁止提权、丢弃 Linux capabilities，并限制 1 GiB 内存和 256 个进程。脱敏运行日志、连续失败状态和任务锁保存在 Docker volume `trace_state` 中；不需要状态时可以用 `docker compose down -v` 清理。
+数据库配置通过 `TRACE_DB_CONFIG` 选择，并只作为 Compose secret 以只读方式挂载到容器，不会复制进镜像。Compose 默认使用测试环境和 `./test-db.yml`；正式运行必须显式设置 `TRACE_ENV=prod` 与 `TRACE_DB_CONFIG=./prod-db.yml`。容器默认使用非 root 用户、只读根文件系统、独立临时文件系统、禁止提权、丢弃 Linux capabilities，并限制 1 GiB 内存和 256 个进程。Chromium 的临时用户配置写入 `/tmp/trace-browser-config`，不会进入镜像或状态卷。脱敏运行日志、连续失败状态和任务锁保存在 Docker volume `trace_state` 中；不需要状态时可以用 `docker compose down -v` 清理。
 
 默认命令查询最近 7 天最多 20 个柜号。临时联调可以覆盖参数，例如：
 
@@ -103,20 +103,18 @@ docker compose run --rm trace --container HMMU4706485 --carrier HMM
 
 ### 测试/正式环境隔离
 
-不要让测试任务依赖默认的正式配置。测试服务器上复制 `test-db.yml.example` 为 `test-db.yml`，填入测试库密码，并通过环境变量显式选择：
+Compose 默认使用测试配置。测试服务器上复制 `test-db.yml.example` 为 `test-db.yml` 并填入测试库密码：
 
 ```bash
 cp test-db.yml.example test-db.yml
 chmod 600 test-db.yml
-export TRACE_ENV=test
-export TRACE_DB_CONFIG=./test-db.yml
 docker compose run --rm trace --summary-only --limit 1
 ```
 
-正式环境继续使用 `prod-db.yml`，但应在正式服务器上单独保存，不能从测试服务器复制。命令行也可以显式指定配置文件：
+正式环境使用独立的 `prod-db.yml`，不能从测试服务器复制，并且必须显式选择正式环境：
 
 ```bash
-TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml \
+TRACE_ENV=prod TRACE_DB_CONFIG=./prod-db.yml \
   docker compose run --rm trace --summary-only --limit 1
 ```
 
@@ -149,7 +147,9 @@ TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml \
   --persist
 ```
 
-写入逻辑按拼柜号 upsert：同一个 `PG+日期...` 只保留一条最新记录；ERP 新单只从当前时间往前 60 天内补充尚未进入 `headway` 的拼柜号，已进入 `headway` 的未到达记录按 `next_query_at` 到期重查。查询失败只更新错误和重试时间，不覆盖上一份有效快照；没有稳定适配器的 `route_unavailable` 和无法识别船司的 `unsupported_carrier` 不写入 `headway`。
+ERP 的 `cabinet_no` 是柜号，`shipping_order` 是订舱号；当前追踪路线只使用 `cabinet_no`。程序会清理柜号内部空白、转为大写，并校验 ISO 6346 格式和校验位。无效柜号返回 `source_data_error`，不会访问船司官网，也不会写入 `headway`。
+
+写入逻辑按拼柜号 upsert：同一个 `PG+日期...` 只保留一条最新记录；ERP 新单只从当前时间往前 60 天内补充尚未进入 `headway` 的拼柜号，已进入 `headway` 的未到达记录按 `next_query_at` 到期重查。查询失败只更新错误和重试时间，不覆盖上一份有效快照；`source_data_error`、没有稳定适配器的 `route_unavailable` 和无法识别船司的 `unsupported_carrier` 计入汇总的 `skipped`，保留在逐条诊断日志中，但不写入 `headway`。
 
 ### 接入 XXL-JOB
 
@@ -163,7 +163,7 @@ XXL-JOB 页面里的“执行器”是“哪台机器可以接收并执行任务
 /opt/trace/deploy/xxl-job/trace-test.sh
 ```
 
-脚本默认选择 `test-db.yml`，写入 `oms.headway` 并只输出脱敏汇总；它返回真实退出码：全部成功为 0，出现部分成功或失败为 1。测试时可以手动执行同一个脚本验证：
+脚本默认选择 `test-db.yml`，写入 `oms.headway` 并只输出脱敏汇总；它返回真实退出码：只有成功或跳过时为 0，出现部分成功或真实失败时为 1。测试时可以手动执行同一个脚本验证：
 
 ```bash
 cd /opt/trace

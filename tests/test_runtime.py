@@ -7,9 +7,16 @@ from trace_api_probe.runtime import DetailRecorder, RunAlreadyActiveError, RunLo
 
 
 def report(status: str = "query_failed") -> dict[str, object]:
+    skipped = int(status in {"source_data_error", "route_unavailable", "unsupported_carrier"})
     return {
         "query": {"source": "table", "read_only": True, "days": 7, "limit": 1, "carrier": "HMM", "count": 1},
-        "summary": {"total": 1, "success": int(status == "success"), "partial": 0, "failed": int(status != "success")},
+        "summary": {
+            "total": 1,
+            "success": int(status == "success"),
+            "partial": int(status == "partial_success"),
+            "skipped": skipped,
+            "failed": int(status not in {"success", "partial_success"} and not skipped),
+        },
         "results": [
             {
                 "carrier": "HMM",
@@ -22,6 +29,46 @@ def report(status: str = "query_failed") -> dict[str, object]:
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_detail_log_marks_source_data_error_as_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "detail.jsonl"
+            sample = type(
+                "Sample",
+                (),
+                {
+                    "id": 8,
+                    "consolidation_no": "PG20260713002",
+                    "container_no": "INVALID",
+                    "shipping_company": "HMM",
+                    "erp_order_count": 1,
+                    "source_error": None,
+                },
+            )()
+            detail_report = report("source_data_error")
+            detail_report["results"][0].update(
+                route="source_validation",
+                error="柜号 INVALID 不符合 ISO 6346 格式",
+            )
+
+            DetailRecorder(log_path=log_path).record(detail_report, samples=[sample], persist=True)
+
+            entry = json.loads(log_path.read_text(encoding="utf-8").strip())
+            self.assertEqual(
+                entry["rows"][0]["persistence"],
+                {"action": "skipped", "reason": "source_data_error"},
+            )
+
+    def test_skipped_result_does_not_increment_failure_streak(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "health.json"
+            recorder = RunRecorder(health_state_path=state_path, alert_threshold=1)
+
+            alerts = recorder.record(report("source_data_error"))
+
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(alerts, [])
+            self.assertEqual(state["carriers"]["HMM"]["consecutive_failed_runs"], 0)
+
     def test_lock_rejects_overlapping_run(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "trace.lock"

@@ -11,6 +11,22 @@ def sample(company: str = "YML阳明", container: str = "YMMU7349033") -> Shipme
 
 
 class TrackingRouterTests(unittest.TestCase):
+    def test_rejects_invalid_container_before_calling_carrier_adapter(self) -> None:
+        calls = []
+        routes = {
+            Carrier.YANG_MING: CarrierRoute(
+                "fake",
+                "测试路线",
+                lambda container, options: calls.append(container),
+            )
+        }
+
+        result = TrackingRouter(routes).query(sample(container="YMMU7349034"), TrackingOptions())
+
+        self.assertEqual(result["status"], "source_data_error")
+        self.assertEqual(result["route"], "source_validation")
+        self.assertEqual(calls, [])
+
     def test_routes_sample_and_keeps_raw_payload(self) -> None:
         routes = {
             Carrier.YANG_MING: CarrierRoute("fake", "测试路线", lambda container, options: {"events": [container]})
