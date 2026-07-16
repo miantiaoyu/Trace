@@ -1,6 +1,6 @@
 import unittest
 
-from crawler_lab.evergreen_probe import TrackingPageError, _extract_tracking_rows
+from trace_api_probe.providers.evergreen_probe import TrackingPageError, _extract_tracking_rows
 
 
 class EvergreenProbeTests(unittest.TestCase):

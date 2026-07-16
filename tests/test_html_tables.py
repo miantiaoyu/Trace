@@ -1,6 +1,6 @@
 import unittest
 
-from crawler_lab.html_tables import extract_table_rows, extract_tables
+from trace_api_probe.providers.html_tables import extract_table_rows, extract_tables
 
 
 class HtmlTablesTests(unittest.TestCase):

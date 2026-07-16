@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from crawler_lab.html_tables import extract_table_rows
+from trace_api_probe.providers.html_tables import extract_table_rows
 
 
 TRACKING_ENTRY_URL = "https://www.wanhai.com/views/cargoTrack/CargoTrack.xhtml?file_num=65580"

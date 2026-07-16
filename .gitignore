@@ -10,3 +10,4 @@ venv/
 .trace-api-probe.lock
 trace-runs.jsonl
 trace-health.json
+dist/

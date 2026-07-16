@@ -1,6 +1,6 @@
 import unittest
 
-from crawler_lab.maersk_probe import MaerskTrackingError, _validate_payload
+from trace_api_probe.providers.maersk_probe import MaerskTrackingError, _validate_payload
 
 
 class MaerskProbeTests(unittest.TestCase):

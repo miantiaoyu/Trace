@@ -1,6 +1,6 @@
 import unittest
 
-from crawler_lab.browser_dom_probe import split_row
+from trace_api_probe.providers.browser_dom_probe import split_row
 
 
 class BrowserDomProbeTests(unittest.TestCase):

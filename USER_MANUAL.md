@@ -116,6 +116,16 @@ docker compose run --rm trace --summary-only --limit 1
 
 当前不提供测试/正式运行模式切换。上线前需要单独评审并把 `target_db` 改为正式 `oms` 配置；`source_db` 仍保持阿里正式 ERP 只读连接。
 
+### 生成服务器发布包
+
+在 PowerShell 中执行：
+
+```powershell
+.\tools\build_server_bundle.ps1
+```
+
+会生成 `dist/trace-server.zip`。压缩包只包含运行源码、Docker 文件、XXL-JOB wrapper 和服务器说明；不包含 `tests/`、`docs/`、`crawler_lab/`、`sql/`、Git 元数据、日志或真实数据库配置。服务器解压后需单独放入 `prod-db.yml` 和 `test-db.yml`。
+
 ### 结果落库
 
 在测试库创建结果表：
@@ -279,7 +289,7 @@ coverage: 当前来源实际提供了哪些字段
 
 原始 `raw` 永远保留。字段不足时摘要填 `null` 或空数组，不能用推测值补齐。
 
-各船司发船前、在途和已到目的地阶段的真实样本覆盖情况见 `TRACKING_STAGE_VALIDATION_REPORT.md`。该报告只保存脱敏状态和字段结构，不保存完整生产柜号或原始 HTML。
+各船司发船前、在途和已到目的地阶段的真实样本覆盖情况见 `docs/TRACKING_STAGE_VALIDATION_REPORT.md`。该报告只保存脱敏状态和字段结构，不保存完整生产柜号或原始 HTML。
 
 事件时间类型：
 
@@ -307,9 +317,9 @@ coverage: 当前来源实际提供了哪些字段
 | COSCO、ONE | 4 秒 | 60 秒 | 2 |
 | 马士基、MSC | 6 秒 | 90 秒 | 2 |
 | 万海 | 8 秒 | 120 秒 | 1 |
-| HMM | 12 秒 | 90 秒 | 2 |
+| HMM | 12 秒 | 240 秒 | 2 |
 
-只有可恢复错误才重试，包括硬超时、连接中断、浏览器访问失败、HTTP 429 和 HTTP 5xx。柜号无数据、页面契约变化、参数错误、验证码或访问拒绝不会重试。重试等待采用指数退避并加入最多 1 秒随机抖动，同时取同船司剩余限速时间与退避时间的较大值；默认退避从 2 秒开始，最大 30 秒，没有无限重试。实际等待时长记录在 `execution.retry_delays_seconds`。
+只有可恢复错误才重试，包括硬超时、连接中断、浏览器访问失败、HTTP 429 和 HTTP 5xx。柜号无数据、页面契约变化、参数错误、验证码或访问拒绝不会重试。默认退避从 2 秒开始、最大 30 秒；HMM 等待追踪响应 120 秒，首次失败后等待 60–75 秒再做第二次尝试。没有无限重试，实际等待时长记录在 `execution.retry_delays_seconds`。
 
 ## 常见问题
 
@@ -359,7 +369,7 @@ python -m crawler_lab.weiyun_carriers
 长荣支持直接按柜号查询，无需 API 凭证：
 
 ```bash
-E:\miniconda\envs\py312\python.exe -m crawler_lab.evergreen_probe --container EGHU9204414
+E:\miniconda\envs\py312\python.exe -m trace_api_probe.providers.evergreen_probe --container EGHU9204414
 ```
 
 命令会打印官网结果表的表头和数据行。当前验证返回柜型、最新动态和地点。
@@ -369,7 +379,7 @@ E:\miniconda\envs\py312\python.exe -m crawler_lab.evergreen_probe --container EG
 马士基无需 API 凭证，可通过官网追踪页读取该页面返回的原始 JSON：
 
 ```bash
-E:\miniconda\envs\py312\python.exe -m crawler_lab.maersk_probe --container GVTU5148354
+E:\miniconda\envs\py312\python.exe -m trace_api_probe.providers.maersk_probe --container GVTU5148354
 ```
 
 输出包含始发地、目的地、集装箱事件、船名航次、状态和 ETA。该命令需要 Playwright Chromium，且不会保存 Cookie 或结果文件。
@@ -379,13 +389,13 @@ E:\miniconda\envs\py312\python.exe -m crawler_lab.maersk_probe --container GVTU5
 MSC 可通过官网标准查询页读取页面自身返回的原始 JSON：
 
 ```bash
-E:\miniconda\envs\py312\python.exe -m crawler_lab.msc_probe --container TLLU8937468
+E:\miniconda\envs\py312\python.exe -m trace_api_probe.providers.msc_probe --container TLLU8937468
 ```
 
 默认使用可见浏览器，尽量贴近人工查询流程。如果想改用系统 Edge：
 
 ```bash
-E:\miniconda\envs\py312\python.exe -m crawler_lab.msc_probe --container TLLU8937468 --browser-channel msedge
+E:\miniconda\envs\py312\python.exe -m trace_api_probe.providers.msc_probe --container TLLU8937468 --browser-channel msedge
 ```
 
 输出为官网 `TrackingInfo` 的原始 JSON，当前已验证包含提单号、起讫港、事件、船名航次和 ETA。脚本只读取页面自身返回的数据，不导出 Cookie，不做请求头伪装，也不保存本地结果文件。
@@ -395,7 +405,7 @@ E:\miniconda\envs\py312\python.exe -m crawler_lab.msc_probe --container TLLU8937
 HMM 的新版 Track & Trace 支持直接按柜号查询，统一入口会使用页面自身的 CSRF 表单请求并返回结果表及原始 HTML：
 
 ```bash
-python -m crawler_lab.hmm_probe --container HMMU4706485
+python -m trace_api_probe.providers.hmm_probe --container HMMU4706485
 ```
 
 当前 HMM 在无头浏览器模式下无法稳定访问，脚本会拒绝 `--headless`。服务器需要运行在 Windows 桌面会话，或 Linux 的 Xvfb 虚拟显示器中；不需要人工点击或登录。
@@ -409,7 +419,7 @@ HMM 的 `raw.parse_diagnostics` 会列出页面表格数量、表头，以及是
 万海当前可用的是官网旧站路径，不直接抓 `cec/#/cargotracking`：
 
 ```bash
-E:\miniconda\envs\py312\python.exe -m crawler_lab.wan_hai_probe --container WHSU6376250
+E:\miniconda\envs\py312\python.exe -m trace_api_probe.providers.wan_hai_probe --container WHSU6376250
 ```
 
 脚本会先用标准浏览器会话预热官网，再向 `tracking_query.xhtml` 发送标准表单 POST。当前已验证能返回结果表头和原始数据行，包含柜号、时间、当前状态、堆场/码头、航次、船名和 More detail 文本。如果 More detail 中带出 Booking/B/L 编号，脚本会继续查询一层摘要，返回装船日期、航次和船名。

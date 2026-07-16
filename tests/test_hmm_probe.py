@@ -1,9 +1,12 @@
 import unittest
 
-from crawler_lab.hmm_probe import HmmTrackingError, _build_result
+from trace_api_probe.providers.hmm_probe import TRACKING_RESPONSE_TIMEOUT_MS, HmmTrackingError, _build_result
 
 
 class HmmProbeTests(unittest.TestCase):
+    def test_waits_two_minutes_for_tracking_response(self) -> None:
+        self.assertEqual(TRACKING_RESPONSE_TIMEOUT_MS, 120_000)
+
     def test_builds_result_from_tracking_html(self) -> None:
         html = """
         <div>Tracking Result</div>

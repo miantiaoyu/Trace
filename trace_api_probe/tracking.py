@@ -42,34 +42,34 @@ BROWSER_POLICY = QueryPolicy(min_interval_seconds=6, timeout_seconds=90, max_att
 WAN_HAI_POLICY = QueryPolicy(min_interval_seconds=8, timeout_seconds=120, max_attempts=1)
 HMM_POLICY = QueryPolicy(
     min_interval_seconds=12,
-    timeout_seconds=90,
+    timeout_seconds=240,
     max_attempts=2,
-    backoff_base_seconds=20,
-    backoff_max_seconds=30,
-    jitter_seconds=5,
+    backoff_base_seconds=60,
+    backoff_max_seconds=90,
+    jitter_seconds=15,
 )
 
 
 def _yang_ming(container: str, options: TrackingOptions) -> object:
-    from crawler_lab.yang_ming_probe import fetch_tracking
+    from trace_api_probe.providers.yang_ming_probe import fetch_tracking
 
     return fetch_tracking(container)
 
 
 def _sm_line(container: str, options: TrackingOptions) -> object:
-    from crawler_lab.sm_line_probe import fetch_tracking
+    from trace_api_probe.providers.sm_line_probe import fetch_tracking
 
     return fetch_tracking(container)
 
 
 def _evergreen(container: str, options: TrackingOptions) -> object:
-    from crawler_lab.evergreen_probe import fetch_tracking
+    from trace_api_probe.providers.evergreen_probe import fetch_tracking
 
     return fetch_tracking(container)
 
 
 def _browser_dom(carrier: Carrier, container: str, options: TrackingOptions) -> object:
-    from crawler_lab.browser_dom_probe import fetch_tracking
+    from trace_api_probe.providers.browser_dom_probe import fetch_tracking
 
     return fetch_tracking(carrier.value, container)
 
@@ -83,13 +83,13 @@ def _one(container: str, options: TrackingOptions) -> object:
 
 
 def _maersk(container: str, options: TrackingOptions) -> object:
-    from crawler_lab.maersk_probe import fetch_tracking
+    from trace_api_probe.providers.maersk_probe import fetch_tracking
 
     return fetch_tracking(container)
 
 
 def _msc(container: str, options: TrackingOptions) -> object:
-    from crawler_lab.msc_probe import fetch_tracking
+    from trace_api_probe.providers.msc_probe import fetch_tracking
 
     return fetch_tracking(
         container,
@@ -99,7 +99,7 @@ def _msc(container: str, options: TrackingOptions) -> object:
 
 
 def _wan_hai(container: str, options: TrackingOptions) -> object:
-    from crawler_lab.wan_hai_probe import fetch_tracking
+    from trace_api_probe.providers.wan_hai_probe import fetch_tracking
 
     return fetch_tracking(
         container,
@@ -109,7 +109,7 @@ def _wan_hai(container: str, options: TrackingOptions) -> object:
 
 
 def _hmm(container: str, options: TrackingOptions) -> object:
-    from crawler_lab.hmm_probe import fetch_tracking
+    from trace_api_probe.providers.hmm_probe import fetch_tracking
 
     return fetch_tracking(
         container,

@@ -5,13 +5,14 @@ import json
 import os
 import sys
 
-from crawler_lab.html_tables import extract_tables
+from trace_api_probe.providers.html_tables import extract_tables
 
 
 TRACKING_PAGE_URL = "https://www.hmm21.com/e-service/general/trackNTrace/TrackNTrace.do"
 TRACKING_RESPONSE_PATH = "/e-service/general/trackNTrace/selectTrackNTrace.do"
 CONTAINER_INPUT_SELECTOR = 'input[name="srchCntrNo1"]'
 SEARCH_BUTTON_SELECTOR = 'button[onclick="search()"]'
+TRACKING_RESPONSE_TIMEOUT_MS = 120_000
 
 
 class HmmTrackingError(RuntimeError):
@@ -57,14 +58,14 @@ def fetch_tracking(
                     lambda response: TRACKING_RESPONSE_PATH in response.url
                     and response.request.method == "POST"
                     and response.status == 200,
-                    timeout=60_000,
+                    timeout=TRACKING_RESPONSE_TIMEOUT_MS,
                 ) as response_info:
                     page.locator(SEARCH_BUTTON_SELECTOR).click()
                 raw_html = response_info.value.text()
             finally:
                 browser.close()
     except PlaywrightTimeoutError as exc:
-        raise HmmTrackingError("HMM 官网在 60 秒内未返回追踪结果") from exc
+        raise HmmTrackingError("HMM 官网在 120 秒内未返回追踪结果") from exc
     except PlaywrightError as exc:
         raise HmmTrackingError(f"HMM 浏览器启动或页面访问失败: {exc}") from exc
 

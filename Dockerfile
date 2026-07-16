@@ -18,7 +18,6 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY trace_api_probe ./trace_api_probe
-COPY crawler_lab ./crawler_lab
 
 RUN mkdir --parents /var/lib/trace \
     && chown --recursive trace:trace /app /var/lib/trace

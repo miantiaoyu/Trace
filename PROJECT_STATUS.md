@@ -6,24 +6,24 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 
 ## 当前功能
 
-- 新增 `crawler_lab/browser_dom_probe.py`：通过官方 URL 参数读取 COSCO 与 ONE 的结构化 DOM 事件表，并校验柜号回显和页面结果契约。
-- 新增 `PROJECT_EXPERIENCE.md`，维护船司路径发现、DOM Provider 容错和排查结论。
+- `trace_api_probe/providers/browser_dom_probe.py` 通过官方 URL 参数读取 COSCO 与 ONE 的结构化 DOM 事件表，并校验柜号回显和页面结果契约。
+- `docs/PROJECT_EXPERIENCE.md` 维护船司路径发现、DOM Provider 容错和排查结论。
 - 已验证 SM Line（SML）公开柜号查询：通过临时 `JSESSIONID` 会话可获取状态、船期和轨迹明细原始 JSON。
-- 新增 `crawler_lab/sm_line_probe.py`，按官网页面定义的会话和请求顺序进行低频查询。
+- `trace_api_probe/providers/sm_line_probe.py` 按官网页面定义的会话和请求顺序进行低频查询。
 - 已验证阳明海运（YML）官网公开查询接口：可用柜号直接获取原始 JSON，无需 API 凭证。
-- 新增 `crawler_lab/yang_ming_probe.py`，调用
+- `trace_api_probe/providers/yang_ming_probe.py` 调用
   `https://www.yangming.com/api/CargoTracking/GetTracking` 并打印 `ctStatusInfo` 和
   `dcsaStatusInfo` 原始返回。
 - 已验证长荣海运（Evergreen）官网公开柜号查询：通过普通 HTTP POST 获取结果页，可提取柜型、最新动态和地点，无需浏览器或验证码。
-- 新增 `crawler_lab/evergreen_probe.py`，以表头和柜号回显作为结果契约，避免依赖页面视觉坐标。
+- `trace_api_probe/providers/evergreen_probe.py` 以表头和柜号回显作为结果契约，避免依赖页面视觉坐标。
 - 已验证马士基（Maersk）官网追踪页：可在新浏览器会话中获得页面自身请求的完整原始 JSON，包含起讫港、集装箱事件、船名航次、状态与 ETA。
-- 新增 `crawler_lab/maersk_probe.py`，等待官网页面的 `/synergy/tracking/` 响应并校验柜号回显；不提取或伪造 API 凭证。
+- `trace_api_probe/providers/maersk_probe.py` 等待官网页面的 `/synergy/tracking/` 响应并校验柜号回显；不提取或伪造 API 凭证。
 - 已验证 MSC 官网追踪页：可通过标准浏览器输入柜号并捕获页面自身 `TrackingInfo` 响应，返回原始 JSON，包含提单号、起讫港、事件、船名航次与 ETA。
-- 新增 `crawler_lab/msc_probe.py`，使用 Playwright 驱动官网表单并等待 `/api/feature/tools/TrackingInfo` 的 `POST 200` 响应；默认使用可见浏览器，支持切换 `chromium` 或 `msedge`。
+- `trace_api_probe/providers/msc_probe.py` 使用 Playwright 驱动官网表单并等待 `/api/feature/tools/TrackingInfo` 的 `POST 200` 响应；默认使用可见浏览器，支持切换 `chromium` 或 `msedge`。
 - 已验证万海（Wan Hai）官网查询：`cec/#/cargotracking` 新站入口在当前环境会先经过前置校验，但同一浏览器会话预热旧站后，可进入 `tracking_query.xhtml` 并通过标准表单 POST 取得集装箱列表结果。
-- 新增 `crawler_lab/wan_hai_probe.py`，先用 Playwright 预热官网会话，再以低频 HTTP POST 提交柜号查询，打印结果表头与原始行数据；如果结果行中带出 Booking/B/L 编号，会继续用官网 `Book No. / BL no.` 模式查询一层摘要。
+- `trace_api_probe/providers/wan_hai_probe.py` 先用 Playwright 预热官网会话，再以低频 HTTP POST 提交柜号查询，打印结果表头与原始行数据；如果结果行中带出 Booking/B/L 编号，会继续用官网 `Book No. / BL no.` 模式查询一层摘要。
 - 已验证 HMM 官网新版 Track & Trace：有界 Chromium 可直接按柜号查询，页面 `POST /e-service/general/trackNTrace/selectTrackNTrace.do` 返回追踪 HTML，包含节点、集装箱动态、船名航次与 ETA。
-- `crawler_lab/hmm_probe.py` 使用官网页面生成的 CSRF 表单请求，输出结构化结果表和原始 HTML；同时输出表头与区块识别诊断，柜信息表契约变化时明确失败。HMM 明确不使用无头浏览器。
+- `trace_api_probe/providers/hmm_probe.py` 使用官网页面生成的 CSRF 表单请求，输出结构化结果表和原始 HTML；同时输出表头与区块识别诊断，柜信息表契约变化时明确失败。HMM 明确不使用无头浏览器。
 
 - 当前数据库方向固定：使用 `prod-db.yml` 只读查询阿里正式 ERP，使用 `test-db.yml` 写入内网测试 `oms.headway`；不提供测试/正式模式切换。
 - `oms.headway` 建表定义已包含表备注和全部字段的中文备注；已建表可通过 `sql/headway_add_comments.sql` 只补充备注。
@@ -31,7 +31,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 柜号在路由前统一清理空白、转为大写并校验 ISO 6346 格式及校验位；无效柜号返回 `source_data_error`，不访问船司官网且不写入 `oms.headway`。
 - 阳明 ETA 会去除 `ETA at <port>:` 文本前缀后再转换为数据库时间；长荣可容错真实页面的合并表头，并提取当前状态、地点、船名航次和页面 ETA。
 - `query_failed` 会写入失败摘要并将 `next_query_at` 设为一小时后；到期后重新入选，成功时按原拼柜号 upsert 业务快照并清除旧错误。
-- 有限 `--limit` 时已到期的重查记录优先于 ERP 新单，避免失败记录在持续新单下长期饥饿；HMM 瞬时失败的第二次尝试使用 20–25 秒退避。
+- 有限 `--limit` 时已到期的重查记录优先于 ERP 新单，避免失败记录在持续新单下长期饥饿；HMM 等待追踪响应 120 秒，第二次尝试使用 60–75 秒退避。
 - 支持完整船司字段归一化，已覆盖数据库常见的中英文、简称、BCO/NVO 写法；HMM 对历史乱码后缀使用 `HMM%` 数据库前缀兜底。
 - 统一入口按船司路线执行最低访问间隔、硬超时和有限重试；每次查询在独立 Provider 子进程中运行，超时会终止该次进程，避免浏览器和网络请求残留。查询、路由和归一化均按单柜隔离，单条异常不会终止整个批次。
 - 统一摘要由 Pydantic 数据契约校验，当前 schema 为 `1.2`；新增实际出发时间、最终卸船港和目的港实际卸船标志，未知字段和非法类型会在归一化边界明确失败。
@@ -60,7 +60,10 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 ## 关键目录/文件
 
 - `trace_api_probe/`：命令行工具源码。
-- `crawler_lab/`：爬虫与网页自动化实验脚本。
+- `trace_api_probe/providers/`：服务器运行依赖的船司官网适配器。
+- `crawler_lab/`：仅本地开发使用的调研与探针脚本，不进入 Docker 镜像和服务器发布包。
+- `docs/`：设计、船司经验和阶段验证报告，不进入服务器发布包。
+- `tools/build_server_bundle.ps1`：生成不含密钥和开发材料的 `dist/trace-server.zip`。
 - `tests/`：单元测试。
 - `requirements.txt`：运行依赖。
 - `.gitignore`：忽略本地敏感配置和 Python 缓存。
@@ -95,7 +98,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 2026-07-14 对 5 个 HMM 真实样本覆盖提空箱、进场、转运港卸船和转运港再装船状态；页面包含 8 至 9 张表，核心区块表头结构一致。增强解析后又对近期与转运样本完成官网回归。
 - 2026-07-14 完成马士基时间语义回归：最新 `ACTUAL` 为当前状态，最早后续 `EXPECTED` 为下一预计节点，不再依赖官网数组顺序。
 - 2026-07-14 使用真实官网样本完成 SM Line、长荣、MSC、万海统一映射回归。SM Line 与 MSC 可区分实际/预计事件；长荣来源未提供事件类型；万海当前列表提供最新实际状态并由 Booking 摘要补船名航次。
-- 2026-07-14 完成已接入船司的运输阶段样本验证，结果记录于 `TRACKING_STAGE_VALIDATION_REPORT.md`。马士基、HMM、ONE、COSCO、阳明、MSC 覆盖发船前、在途和已到目的地；长荣缺发船前样本，万海缺发船前和明确在途样本，SM Line 仅有一个发船前数据库样本。
+- 2026-07-14 完成已接入船司的运输阶段样本验证，结果记录于 `docs/TRACKING_STAGE_VALIDATION_REPORT.md`。马士基、HMM、ONE、COSCO、阳明、MSC 覆盖发船前、在途和已到目的地；长荣缺发船前样本，万海缺发船前和明确在途样本，SM Line 仅有一个发船前数据库样本。
 - 阶段验证期间补齐万海数据库别名、柜号内部空格清理、ONE Actual/Estimated 与上下文继承、COSCO 制表符拆分、阳明 DCSA 事件映射及过期预计节点过滤。
 - 2026-07-14 完成 Selectolax 迁移后的官网回归：HMM 返回 9 张表并提取 2 个事件，长荣返回 1 条结果行，万海有界模式返回 1 条最新状态；统一摘要均通过 Pydantic schema `1.1` 校验。
 

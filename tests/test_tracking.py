@@ -14,9 +14,10 @@ class TrackingRouterTests(unittest.TestCase):
     def test_hmm_policy_uses_conservative_retry_backoff(self) -> None:
         policy = ROUTES[Carrier.HMM].policy
 
-        self.assertEqual(policy.backoff_base_seconds, 20)
-        self.assertEqual(policy.backoff_max_seconds, 30)
-        self.assertEqual(policy.jitter_seconds, 5)
+        self.assertEqual(policy.timeout_seconds, 240)
+        self.assertEqual(policy.backoff_base_seconds, 60)
+        self.assertEqual(policy.backoff_max_seconds, 90)
+        self.assertEqual(policy.jitter_seconds, 15)
 
     def test_rejects_invalid_container_before_calling_carrier_adapter(self) -> None:
         calls = []

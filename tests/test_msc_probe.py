@@ -1,6 +1,6 @@
 import unittest
 
-from crawler_lab.msc_probe import MscTrackingError, _validate_payload
+from trace_api_probe.providers.msc_probe import MscTrackingError, _validate_payload
 
 
 class MscProbeTests(unittest.TestCase):

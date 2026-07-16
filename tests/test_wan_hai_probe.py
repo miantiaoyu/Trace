@@ -1,6 +1,6 @@
 import unittest
 
-from crawler_lab.wan_hai_probe import (
+from trace_api_probe.providers.wan_hai_probe import (
     WanHaiTrackingError,
     _extract_booking_summary_rows,
     _extract_reference_numbers,

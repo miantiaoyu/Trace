@@ -6,6 +6,10 @@ __pycache__
 *.py[cod]
 .pytest_cache
 tests
+docs
+crawler_lab
+tools
+sql
 prod-db.yml
 test-db.yml
 *.local.yml
