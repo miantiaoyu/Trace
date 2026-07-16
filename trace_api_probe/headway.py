@@ -11,7 +11,7 @@ from trace_api_probe.db import ShipmentSample
 HEADWAY_TABLE = "`oms`.`headway`"
 SUCCESS_STATUSES = {"success"}
 RAW_SUCCESS_STATUSES = {"success", "partial_success"}
-SKIPPED_STATUSES = {"route_unavailable"}
+SKIPPED_STATUSES = {"route_unavailable", "unsupported_carrier"}
 
 
 def persist_headway(

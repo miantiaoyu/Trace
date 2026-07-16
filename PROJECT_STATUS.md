@@ -77,7 +77,8 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 支持通过 `TRACE_ENV`/`TRACE_DB_CONFIG` 隔离测试与正式数据库配置，兼容简单 key/value 和 Spring `jdbc:mysql://` 数据源格式。
 - 提供 XXL-JOB `SHELL` 任务 wrapper，测试环境可由统一调度平台调用 Docker 批处理，不要求 Python 进程注册为 Java executor。
 - 测试配置模板使用 `oms` 数据库；`--persist` 模式按拼柜号 upsert `oms.headway`，不写 ERP 源表。
-- 未适配船司返回 `route_unavailable` 并保留在本轮报告中，但不写入 `oms.headway`。
+- 未适配船司返回 `route_unavailable`，无法识别船司返回 `unsupported_carrier`，二者保留在本轮报告和逐条诊断日志中，但不写入 `oms.headway`。
+- 支持 `--detail-log` 写入逐条 JSONL 诊断日志，记录样本、路线、错误摘要、核心字段缺失和写库决策；不保存官网 raw 原始响应。
 
 ## 最近验证
 

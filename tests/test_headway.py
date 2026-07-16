@@ -118,6 +118,28 @@ class HeadwayTests(unittest.TestCase):
         self.assertFalse(connection.committed)
         self.assertEqual(cursor.calls, [])
 
+    def test_persist_headway_skips_unsupported_carriers(self) -> None:
+        cursor = FakeCursor()
+        connection = FakeConnection(cursor)
+        fake_module = types.SimpleNamespace(
+            cursors=types.SimpleNamespace(DictCursor=object),
+            connect=lambda **kwargs: connection,
+        )
+        sample = ShipmentSample(1, "未知船司", "TEST0000001", None, None, "PG20260713003", 1)
+        result = {"status": "unsupported_carrier", "carrier": "UNKNOWN", "error": "无法识别船司"}
+
+        with patch.dict(sys.modules, {"pymysql": fake_module}):
+            summary = persist_headway(
+                DbConfig("db.example", 3306, "writer", "secret"),
+                environment="test",
+                samples=[sample],
+                results=[result],
+            )
+
+        self.assertEqual(summary, {"attempted": 0, "persisted": 0, "skipped": 1})
+        self.assertFalse(connection.committed)
+        self.assertEqual(cursor.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,7 +10,7 @@ from trace_api_probe.carriers import Carrier, parse_carrier
 from trace_api_probe.config import read_db_config
 from trace_api_probe.db import ShipmentSample, fetch_pending_shipments, fetch_recent_shipments
 from trace_api_probe.headway import persist_headway
-from trace_api_probe.runtime import RunLock, RunRecorder
+from trace_api_probe.runtime import DetailRecorder, RunLock, RunRecorder
 from trace_api_probe.tracking import TrackingOptions, query_samples
 
 
@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lock-file", default=".trace-api-probe.lock", help="防止定时任务重叠的锁文件路径")
     parser.add_argument("--lock-timeout-seconds", type=_nonnegative_float, default=0, help="等待任务锁的秒数，默认立即失败")
     parser.add_argument("--run-log", help="可选的脱敏 JSONL 运行日志路径")
+    parser.add_argument("--detail-log", help="可选的逐条诊断 JSONL 日志路径；不保存 raw 原始响应")
     parser.add_argument("--health-state", help="可选的船司连续失败状态文件路径")
     parser.add_argument("--alert-threshold", type=_positive_int, default=3, help="连续多少轮无成功结果后告警，默认 3")
     parser.add_argument("--summary-only", action="store_true", help="只输出脱敏查询汇总，不输出柜号和 raw 原始响应")
@@ -95,6 +96,11 @@ def main(argv: list[str] | None = None) -> int:
                     samples=samples,
                     results=report["results"],
                 )
+            DetailRecorder(log_path=Path(args.detail_log) if args.detail_log else None).record(
+                report,
+                samples=samples,
+                persist=args.persist,
+            )
             for alert in report["alerts"]:
                 print(f"告警：{alert['message']}", file=sys.stderr)
         _print_json(report, summary_only=args.summary_only)

@@ -4,7 +4,7 @@ import json
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from filelock import FileLock, Timeout
 
@@ -90,6 +90,38 @@ class RunRecorder:
         return alerts
 
 
+class DetailRecorder:
+    """Persist per-sample diagnostics without storing raw carrier responses."""
+
+    def __init__(self, *, log_path: Path | None = None) -> None:
+        self._log_path = log_path
+
+    def record(
+        self,
+        report: Mapping[str, object],
+        *,
+        samples: Sequence[object],
+        persist: bool,
+    ) -> None:
+        if self._log_path is None:
+            return
+        results = report.get("results")
+        result_rows = results if isinstance(results, list) else []
+        rows = [
+            _detail_row(sample, result, persist=persist)
+            for sample, result in zip(samples, result_rows, strict=False)
+            if isinstance(result, Mapping)
+        ]
+        entry = {
+            "recorded_at": _utc_now(),
+            "query": report.get("query", {}),
+            "summary": report.get("summary", {}),
+            "persistence": report.get("persistence", {}),
+            "rows": rows,
+        }
+        _append_json_line(self._log_path, entry)
+
+
 def _sanitized_entry(report: Mapping[str, object]) -> dict[str, object]:
     query = report.get("query")
     summary = report.get("summary")
@@ -139,6 +171,78 @@ def _sanitized_entry(report: Mapping[str, object]) -> dict[str, object]:
         "summary": dict(summary) if isinstance(summary, Mapping) else {},
         "carriers": carriers,
     }
+
+
+def _detail_row(sample: object, result: Mapping[str, object], *, persist: bool) -> dict[str, object]:
+    normalized = result.get("normalized")
+    normalized = normalized if isinstance(normalized, Mapping) else {}
+    current = normalized.get("current")
+    current = current if isinstance(current, Mapping) else {}
+    vessel = normalized.get("vessel")
+    vessel = vessel if isinstance(vessel, Mapping) else {}
+    execution = result.get("execution")
+    execution = execution if isinstance(execution, Mapping) else {}
+    status = str(result.get("status") or "internal_error")
+    fields = {
+        "departure_time": normalized.get("departure_time") is not None,
+        "origin_port": (normalized.get("origin_port") or normalized.get("origin")) is not None,
+        "destination_port": (normalized.get("destination_port") or normalized.get("destination")) is not None,
+        "destination_eta": normalized.get("destination_eta") is not None,
+        "current_status": current.get("status") is not None,
+        "current_location": current.get("location") is not None,
+        "vessel_name": vessel.get("name") is not None,
+        "voyage": vessel.get("voyage") is not None,
+    }
+    error = result.get("error")
+    return {
+        "sample": {
+            "id": getattr(sample, "id", None),
+            "consolidation_no": getattr(sample, "consolidation_no", None),
+            "container_no": getattr(sample, "container_no", None),
+            "shipping_company": getattr(sample, "shipping_company", None),
+            "erp_order_count": getattr(sample, "erp_order_count", None),
+            "source_error": getattr(sample, "source_error", None),
+        },
+        "result": {
+            "carrier": result.get("carrier"),
+            "status": status,
+            "route": result.get("route"),
+            "route_description": result.get("route_description"),
+            "error_type": _error_type(error),
+            "error_message": _error_message(error),
+            "attempts": execution.get("attempts"),
+            "elapsed_seconds": execution.get("elapsed_seconds"),
+            "raw_present": result.get("raw") is not None,
+            "normalized_present": bool(normalized),
+            "fields": fields,
+            "missing_core_fields": [key for key, present in fields.items() if not present],
+        },
+        "persistence": _persistence_decision(sample, status, persist=persist),
+    }
+
+
+def _persistence_decision(sample: object, status: str, *, persist: bool) -> dict[str, object]:
+    if not persist:
+        return {"action": "not_requested"}
+    if not getattr(sample, "consolidation_no", None):
+        return {"action": "skipped", "reason": "missing_consolidation_no"}
+    if status in {"route_unavailable", "unsupported_carrier"}:
+        return {"action": "skipped", "reason": status}
+    return {"action": "upsert"}
+
+
+def _error_type(value: object) -> str | None:
+    if isinstance(value, Mapping):
+        error_type = value.get("type")
+        return str(error_type) if error_type else None
+    return type(value).__name__ if value else None
+
+
+def _error_message(value: object) -> str | None:
+    if isinstance(value, Mapping):
+        message = value.get("message")
+        return str(message)[:500] if message else None
+    return str(value)[:500] if value else None
 
 
 def _append_json_line(path: Path, value: Mapping[str, object]) -> None:

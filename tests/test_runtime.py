@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from trace_api_probe.runtime import RunAlreadyActiveError, RunLock, RunRecorder
+from trace_api_probe.runtime import DetailRecorder, RunAlreadyActiveError, RunLock, RunRecorder
 
 
 def report(status: str = "query_failed") -> dict[str, object]:
@@ -56,6 +56,36 @@ class RuntimeTests(unittest.TestCase):
 
             state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(state["carriers"]["HMM"]["consecutive_failed_runs"], 1)
+
+    def test_detail_log_records_per_sample_failure_without_raw_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            log_path = Path(directory) / "detail.jsonl"
+            sample = type(
+                "Sample",
+                (),
+                {
+                    "id": 7,
+                    "consolidation_no": "PG20260713001",
+                    "container_no": "HMMU0000001",
+                    "shipping_company": "HMM",
+                    "erp_order_count": 2,
+                    "source_error": None,
+                },
+            )()
+            detail_report = report()
+            detail_report["results"][0]["route"] = "hmm_browser_html"
+            detail_report["results"][0]["error"] = {"type": "TimeoutError", "message": "timeout"}
+            detail_report["results"][0]["raw"] = {"html": "<secret raw>"}
+
+            DetailRecorder(log_path=log_path).record(detail_report, samples=[sample], persist=True)
+
+            entry = json.loads(log_path.read_text(encoding="utf-8").strip())
+            row = entry["rows"][0]
+            self.assertEqual(row["sample"]["consolidation_no"], "PG20260713001")
+            self.assertEqual(row["result"]["error_type"], "TimeoutError")
+            self.assertTrue(row["result"]["raw_present"])
+            self.assertNotIn("<secret raw>", log_path.read_text(encoding="utf-8"))
+            self.assertEqual(row["persistence"]["action"], "upsert")
 
 
 if __name__ == "__main__":

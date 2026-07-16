@@ -142,13 +142,14 @@ TRACE_ENV=test TRACE_DB_CONFIG=./test-db.yml \
   --limit 0 \
   --lock-file /var/lib/trace/.trace-api-probe.lock \
   --run-log /var/lib/trace/trace-runs.jsonl \
+  --detail-log /var/lib/trace/trace-detail.jsonl \
   --health-state /var/lib/trace/trace-health.json \
   --alert-threshold 3 \
   --summary-only \
   --persist
 ```
 
-写入逻辑按拼柜号 upsert：同一个 `PG+日期...` 只保留一条最新记录；ERP 新单只从当前时间往前 60 天内补充尚未进入 `headway` 的拼柜号，已进入 `headway` 的未到达记录按 `next_query_at` 到期重查。查询失败只更新错误和重试时间，不覆盖上一份有效快照；没有稳定适配器的 `route_unavailable` 不写入 `headway`。
+写入逻辑按拼柜号 upsert：同一个 `PG+日期...` 只保留一条最新记录；ERP 新单只从当前时间往前 60 天内补充尚未进入 `headway` 的拼柜号，已进入 `headway` 的未到达记录按 `next_query_at` 到期重查。查询失败只更新错误和重试时间，不覆盖上一份有效快照；没有稳定适配器的 `route_unavailable` 和无法识别船司的 `unsupported_carrier` 不写入 `headway`。
 
 ### 接入 XXL-JOB
 
@@ -215,6 +216,16 @@ docker compose run --rm --no-deps -T --entrypoint sh trace \
 
 每行包含运行时间、查询范围、成功/失败数量、重试次数和平均耗时，不包含柜号、原始响应或数据库凭证。
 
+查看最近一轮逐条诊断日志：
+
+```bash
+cd /opt/trace
+docker compose run --rm --no-deps -T --entrypoint sh trace \
+  -c 'tail -n 1 /var/lib/trace/trace-detail.jsonl'
+```
+
+诊断日志按轮写入 JSONL，包含每条样本的拼柜号、柜号、ERP 船司、查询状态、路线、错误摘要、尝试次数、核心字段缺失情况和本轮是否写库；不保存官网 raw 原始响应。
+
 手动指定柜号进行单条联调，不读取数据库：
 
 ```bash
@@ -240,11 +251,12 @@ python -m trace_api_probe --timeout-seconds 90 --max-attempts 2 --min-interval-s
 ```bash
 python -m trace_api_probe --days 7 --limit 20 \
   --run-log var/trace-runs.jsonl \
+  --detail-log var/trace-detail.jsonl \
   --health-state var/trace-health.json \
   --alert-threshold 3
 ```
 
-运行日志只记录查询范围、成功/失败数量、尝试次数、重试次数和耗时，不记录柜号、原始响应或数据库连接信息。某船司连续达到 3 轮没有成功结果时，报告的 `alerts` 字段和标准错误会输出告警。默认不传 `--run-log` 与 `--health-state` 时不写这些文件。
+运行指标日志只记录查询范围、成功/失败数量、尝试次数、重试次数和耗时，不记录柜号、原始响应或数据库连接信息。逐条诊断日志会记录拼柜号、柜号和错误摘要，但不保存官网 raw 原始响应。某船司连续达到 3 轮没有成功结果时，报告的 `alerts` 字段和标准错误会输出告警。默认不传 `--run-log`、`--detail-log` 与 `--health-state` 时不写这些文件。
 
 输出报告包含 `query`、`summary` 和 `results`。`summary` 分别统计 `success`、`partial` 和 `failed`。每条 `results` 记录包含数据库样本信息、归一化船司、路线、执行次数、状态、`normalized` 统一摘要和 `raw` 原始返回；网页受限、超时或解析异常只影响当前柜号，不会让其他记录消失。
 

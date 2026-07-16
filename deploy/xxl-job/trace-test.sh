@@ -20,6 +20,7 @@ exec "${compose[@]}" run --rm --no-deps -T trace \
   --limit "${TRACE_LIMIT:-0}" \
   --lock-file /var/lib/trace/.trace-api-probe.lock \
   --run-log /var/lib/trace/trace-runs.jsonl \
+  --detail-log /var/lib/trace/trace-detail.jsonl \
   --health-state /var/lib/trace/trace-health.json \
   --alert-threshold 3 \
   --summary-only \
