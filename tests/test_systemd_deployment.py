@@ -34,7 +34,7 @@ class SystemdDeploymentTests(unittest.TestCase):
 
         self.assertIn("systemctl enable trace.timer", installer)
         self.assertNotIn("enable --now", installer)
-        self.assertIn("TRACE_LIMIT=1", installer)
+        self.assertIn('TRACE_LIMIT="${TRACE_LIMIT:-1}"', installer)
         self.assertIn('if [[ ! -e "/etc/sysconfig/trace" ]]', installer)
 
     def test_server_bundle_uses_systemd_files_instead_of_xxl_job(self) -> None:

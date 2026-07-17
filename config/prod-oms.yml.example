@@ -1,0 +1,4 @@
+# 正式数据库权限审批通过后，复制为 /opt/trace/prod-oms.yml 并填写真实配置。
+url: jdbc:mysql://PROD_OMS_HOST:3306/oms?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai&useSSL=false
+username: PROD_OMS_USER
+password: CHANGE_ME

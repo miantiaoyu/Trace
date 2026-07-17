@@ -1,4 +1,4 @@
-# Copy this file to test-db.yml on the test executor, then set the real password.
+# 复制为 /opt/trace/test-db.yml，并替换密码。
 url: jdbc:mysql://172.16.48.10:3306/oms?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai&useSSL=false
 username: root
 password: CHANGE_ME

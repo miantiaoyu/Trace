@@ -25,7 +25,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - 已验证 HMM 官网新版 Track & Trace：有界 Chromium 可直接按柜号查询，页面 `POST /e-service/general/trackNTrace/selectTrackNTrace.do` 返回追踪 HTML，包含节点、集装箱动态、船名航次与 ETA。
 - `trace_api_probe/providers/hmm_probe.py` 使用官网页面生成的 CSRF 表单请求，输出结构化结果表和原始 HTML；同时输出表头与区块识别诊断，柜信息表契约变化时明确失败。HMM 明确不使用无头浏览器。
 
-- 当前数据库方向固定：使用 `prod-db.yml` 只读查询阿里正式 ERP，使用 `test-db.yml` 写入内网测试 `oms.headway`；不提供测试/正式模式切换。
+- 默认数据库方向为使用 `prod-db.yml` 只读查询阿里正式 ERP，使用 `test-db.yml` 写入内网测试 `oms.headway`；可通过启动脚本参数显式替换读库或写库配置。
 - `oms.headway` 建表定义已包含表备注和全部字段的中文备注；已建表可通过 `sql/headway_add_comments.sql` 只补充备注。
 - 支持从 `trobs.po_cabinet_combination.cabinet_no` 查询最近 N 天的柜号，按 `update_time DESC, id DESC` 排序并按拼柜号聚合；`shipping_order` 是订舱号，不用于当前柜号追踪。
 - 柜号在路由前统一清理空白、转为大写并校验 ISO 6346 格式及校验位；无效柜号返回 `source_data_error`，不访问船司官网且不写入 `oms.headway`。
@@ -84,7 +84,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - HMM 当前必须使用有界浏览器；Linux 服务器需通过 Xvfb 提供虚拟显示器，传 `--headless` 会明确失败。
 - Docker 运行包默认使用非 root 用户、只读根文件系统和资源限制，不暴露 HTTP 端口；Chromium 临时配置写入可写 `/tmp`，状态文件写入独立 Docker volume。
 - 提供 Docker Compose 一次性容器运行方式；完整查询结果不进入调度日志，脱敏指标保存在状态卷。
-- 源和目标连接分别使用固定的 `prod-db.yml` 和 `test-db.yml`，兼容简单 key/value 和 Spring `jdbc:mysql://` 数据源格式；不提供命令行或环境变量切换入口。
+- 源和目标连接默认使用 `prod-db.yml` 和 `test-db.yml`，兼容简单 key/value 和 Spring `jdbc:mysql://` 数据源格式；`deploy/run-trace.sh --source-config ... --target-config ...` 可按次覆盖配置文件。
 - 提供 CentOS 7 兼容的 systemd oneshot service 与 timer，每天凌晨 2 点触发 Docker 批处理；安装时不立即启动，验证后再显式启用运行。
 - 测试配置模板使用 `oms` 数据库；`--persist` 模式按拼柜号 upsert `oms.headway`，不写 ERP 源表。
 - 无效柜号返回 `source_data_error`，未适配船司返回 `route_unavailable`，无法识别船司返回 `unsupported_carrier`；三者计入 `skipped`，保留在本轮报告和逐条诊断日志中，但不写入 `oms.headway`。
@@ -130,7 +130,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 
 - 官网页面路线受页面结构、Cookie 弹窗、浏览器环境、验证码、CDN 策略和官网维护状态影响；结果中会保留失败原因。
 - `prod-db.yml` 包含敏感信息，应只保留在本地并由 `.gitignore` 排除。
-- `test-db.yml` 与正式配置一样只保留在对应服务器；`test-db.yml.example` 不含真实密码。
+- `test-db.yml` 与正式配置一样只保留在对应服务器；`config/*.yml.example` 只含无密码模板。
 - `headway` 结果表需要先在目标环境执行 `sql/headway.sql`，并使用具备该表写权限的数据库账号。
 
 ## 给下一个模型的快速上下文

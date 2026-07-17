@@ -37,7 +37,8 @@ $files = @(
 )
 $directories = @(
     "trace_api_probe",
-    "deploy\systemd"
+    "deploy\systemd",
+    "config"
 )
 
 foreach ($relativePath in $files) {
@@ -50,6 +51,18 @@ foreach ($relativePath in $directories) {
     $destination = Join-Path $bundleRoot $relativePath
     New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $repoRoot $relativePath) -Destination $destination -Recurse
+}
+
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+foreach ($relativePath in @(
+    "deploy\run-trace.sh",
+    "deploy\install-systemd.sh",
+    "deploy\systemd\trace.service",
+    "deploy\systemd\trace.timer"
+)) {
+    $path = Join-Path $bundleRoot $relativePath
+    $content = [IO.File]::ReadAllText($path)
+    [IO.File]::WriteAllText($path, $content.Replace("`r`n", "`n"), $utf8NoBom)
 }
 
 Get-ChildItem -LiteralPath $bundleRoot -Directory -Recurse -Force |
