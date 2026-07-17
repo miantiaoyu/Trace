@@ -37,6 +37,11 @@ class ConfigSelectionTests(unittest.TestCase):
         self.assertIn("CHANGE_ME", prod_oms)
         self.assertNotIn("123456", test)
 
+    def test_bundle_builder_writes_linux_compatible_zip_paths(self) -> None:
+        builder = (ROOT / "tools" / "build_server_bundle.ps1").read_text(encoding="utf-8")
+
+        self.assertIn("ZipFileExtensions", builder)
+        self.assertIn(".Replace('", builder)
 
 if __name__ == "__main__":
     unittest.main()

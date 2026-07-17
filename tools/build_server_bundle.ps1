@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param()
 
+$ErrorActionPreference = "Stop"
+
 function ConvertFrom-Utf8Base64([string]$value) {
     [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($value))
 }
@@ -72,7 +74,24 @@ Get-ChildItem -LiteralPath $bundleRoot -File -Recurse -Filter "*.pyc" |
     Remove-Item -Force
 
 Copy-Item -LiteralPath (Join-Path $repoRoot "deploy\SERVER_README.md") -Destination (Join-Path $bundleRoot "README.md")
-Compress-Archive -Path (Join-Path $bundleRoot "*") -DestinationPath $zipPath -CompressionLevel Optimal
+
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$archive = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($file in Get-ChildItem -LiteralPath $bundleRoot -File -Recurse) {
+        $entryName = $file.FullName.Substring($bundleRoot.Length + 1).Replace('\', '/')
+        [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $archive,
+            $file.FullName,
+            $entryName,
+            [IO.Compression.CompressionLevel]::Optimal
+        ) | Out-Null
+    }
+}
+finally {
+    $archive.Dispose()
+}
 
 $createdMessage = ConvertFrom-Utf8Base64 "5pyN5Yqh5Zmo5Y+R5biD5YyF5bey55Sf5oiQOiA="
 $configMessage = ConvertFrom-Utf8Base64 "5Y+R5biD5YyF5LiN5YyF5ZCrIHByb2QtZGIueW1sIOWSjCB0ZXN0LWRiLnltbO+8m+ivt+WcqOacjeWKoeWZqOS4iuWNleeLrOaPkOS+m+OAgg=="
