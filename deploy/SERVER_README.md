@@ -4,12 +4,20 @@
 
 ## 准备配置
 
-在 `/opt/trace` 单独放置：
+默认测试运行时，在 `/opt/trace` 单独放置：
 
 - `prod-db.yml`：阿里正式 ERP 只读连接。
 - `test-db.yml`：内网测试 `oms.headway` 写入连接。
 
 这两个文件必须通过服务器密钥或公司配置流程提供，不进入压缩包和镜像。
+
+正式写库时，仍保留 `prod-db.yml` 作为正式 ERP 只读配置，并额外放置审批后的 `prod-oms.yml`；将 `/etc/sysconfig/trace` 的 `TRACE_TARGET_CONFIG` 改为 `./prod-oms.yml` 即可，不需要改代码或重建镜像。
+
+发布包中的 `config/*.yml.example` 是无密码模板。默认文件名无需设置变量；如果要指定其他写入库配置，可直接执行：
+
+```bash
+bash deploy/run-trace.sh --target-config prod-oms.yml
+```
 
 ## 构建与小批验证
 

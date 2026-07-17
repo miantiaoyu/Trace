@@ -40,9 +40,9 @@ services:
 
 secrets:
   source_db:
-    file: ./prod-db.yml
+    file: ${TRACE_SOURCE_CONFIG:-./prod-db.yml}
   target_db:
-    file: ./test-db.yml
+    file: ${TRACE_TARGET_CONFIG:-./test-db.yml}
 
 volumes:
   trace_state:
