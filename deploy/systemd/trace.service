@@ -1,0 +1,14 @@
+[Unit]
+Description=Trace 集装箱轨迹批处理
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/trace
+Environment=TRACE_PROJECT_DIR=/opt/trace
+EnvironmentFile=-/etc/sysconfig/trace
+ExecStart=/opt/trace/deploy/run-trace.sh
+TimeoutStartSec=infinity
+Nice=10

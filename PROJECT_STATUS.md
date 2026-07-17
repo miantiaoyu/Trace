@@ -74,7 +74,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 
 ## 当前限制
 
-- 命令行默认每次最多查询 20 个去重柜号；传 `--limit 0` 查询最近窗口内的全部柜号。上线 wrapper 默认使用 `--days 60 --limit 0`，ERP 新单只补 `headway` 中不存在的拼柜号，已入表未到达记录按 `next_query_at` 到期重查。
+- 命令行默认每次最多查询 20 个去重柜号；传 `--limit 0` 查询最近窗口内的全部柜号。服务器定时脚本默认使用 `--days 60 --limit 0`，ERP 新单只补 `headway` 中不存在的拼柜号，已入表未到达记录按 `next_query_at` 到期重查。
 - 不做可视化；默认不写库，`--persist` 只更新 `oms.headway` 当前快照，不写 ERP 源表；原始 JSON 只保留最新一次。
 - 维运网目前只验证到“识别/跳转链接生成”，未直接返回集装箱轨迹事件。
 - MSC 当前走的是官网标准页面流程，不是公开 API 凭证接入；结果仍受官网页面结构、Cookie 弹窗和低频访问策略影响。
@@ -85,7 +85,7 @@ Trace 当前从 ERP 源表读取拼柜号、船司和柜号，按船司选择已
 - Docker 运行包默认使用非 root 用户、只读根文件系统和资源限制，不暴露 HTTP 端口；Chromium 临时配置写入可写 `/tmp`，状态文件写入独立 Docker volume。
 - 提供 Docker Compose 一次性容器运行方式；完整查询结果不进入调度日志，脱敏指标保存在状态卷。
 - 源和目标连接分别使用固定的 `prod-db.yml` 和 `test-db.yml`，兼容简单 key/value 和 Spring `jdbc:mysql://` 数据源格式；不提供命令行或环境变量切换入口。
-- 提供 XXL-JOB `SHELL` 任务 wrapper，测试环境可由统一调度平台调用 Docker 批处理，不要求 Python 进程注册为 Java executor。
+- 提供 CentOS 7 兼容的 systemd oneshot service 与 timer，每天凌晨 2 点触发 Docker 批处理；安装时不立即启动，验证后再显式启用运行。
 - 测试配置模板使用 `oms` 数据库；`--persist` 模式按拼柜号 upsert `oms.headway`，不写 ERP 源表。
 - 无效柜号返回 `source_data_error`，未适配船司返回 `route_unavailable`，无法识别船司返回 `unsupported_carrier`；三者计入 `skipped`，保留在本轮报告和逐条诊断日志中，但不写入 `oms.headway`。
 - 支持 `--detail-log` 写入逐条 JSONL 诊断日志，记录样本、路线、错误摘要、核心字段缺失和写库决策；不保存官网 raw 原始响应。

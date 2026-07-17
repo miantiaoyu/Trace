@@ -1,0 +1,10 @@
+[Unit]
+Description=每天运行 Trace 集装箱轨迹批处理
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+Unit=trace.service
+
+[Install]
+WantedBy=timers.target

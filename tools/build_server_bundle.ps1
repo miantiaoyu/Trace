@@ -31,15 +31,19 @@ $files = @(
     ".dockerignore",
     "docker-compose.yml",
     "Dockerfile",
-    "requirements.txt"
+    "requirements.txt",
+    "deploy\run-trace.sh",
+    "deploy\install-systemd.sh"
 )
 $directories = @(
     "trace_api_probe",
-    "deploy\xxl-job"
+    "deploy\systemd"
 )
 
 foreach ($relativePath in $files) {
-    Copy-Item -LiteralPath (Join-Path $repoRoot $relativePath) -Destination (Join-Path $bundleRoot $relativePath)
+    $destination = Join-Path $bundleRoot $relativePath
+    New-Item -ItemType Directory -Path (Split-Path $destination -Parent) -Force | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repoRoot $relativePath) -Destination $destination
 }
 
 foreach ($relativePath in $directories) {
