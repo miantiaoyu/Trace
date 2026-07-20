@@ -336,6 +336,8 @@ coverage: 当前来源实际提供了哪些字段
 - `internal_error`：当前柜号发生未预期的路由异常；异常被单柜隔离，后续柜号继续执行。
 - `route_unavailable`：船司已识别，但没有稳定自动化路线。
 
+`headway.last_error_type` 会尽量记录真实 Provider 异常类型，例如 `HmmTrackingError` 或 `WanHaiTrackingError`；只有无法识别子进程异常来源时才会保留外层 Python 异常类型。
+
 每个真实查询在独立 Python 子进程中运行。超过硬超时后父进程会终止该子进程，浏览器崩溃或页面卡死不会阻塞整个批次。
 
 ## 默认限速与重试

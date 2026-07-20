@@ -21,6 +21,7 @@ class SystemdDeploymentTests(unittest.TestCase):
         self.assertIn("After=docker.service network-online.target", service)
         self.assertIn("Type=oneshot", service)
         self.assertIn("ExecStart=/opt/trace/deploy/run-trace.sh", service)
+        self.assertIn("TimeoutStartSec=0", service)
 
     def test_timer_runs_daily_and_catches_up_after_downtime(self) -> None:
         timer = (ROOT / "deploy" / "systemd" / "trace.timer").read_text(encoding="utf-8")

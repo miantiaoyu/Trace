@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import subprocess
 import sys
 import time
@@ -11,6 +12,13 @@ from typing import Callable
 
 class QueryTimeoutError(TimeoutError):
     pass
+
+
+class ProviderProcessError(RuntimeError):
+    def __init__(self, message: str, *, provider_error_type: str | None = None) -> None:
+        super().__init__(message)
+        self.provider_error_type = provider_error_type
+        self.provider_error_message = message
 
 
 @dataclass(frozen=True)
@@ -152,8 +160,9 @@ def _run_with_subprocess_timeout(
     except subprocess.TimeoutExpired as exc:
         raise QueryTimeoutError(f"查询超过 {timeout_seconds:g} 秒，已终止本次 Provider 进程") from exc
     if completed.returncode != 0:
-        message = completed.stderr.strip() or completed.stdout.strip() or f"退出码: {completed.returncode}"
-        raise RuntimeError(message)
+        raw_message = completed.stderr.strip() or completed.stdout.strip() or f"退出码: {completed.returncode}"
+        error_type, message = _parse_worker_error(raw_message)
+        raise ProviderProcessError(message, provider_error_type=error_type)
     try:
         return json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
@@ -211,3 +220,14 @@ def _attach_failure_metadata(
         setattr(exc, "query_retry_delays_seconds", retry_delays)
     except Exception:
         return
+
+
+def _parse_worker_error(raw_message: str) -> tuple[str | None, str]:
+    message = raw_message.strip()
+    first_line = next((line.strip() for line in message.splitlines() if line.strip()), "")
+    match = re.match(r"^([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)):\s*(.*)$", first_line)
+    if not match:
+        return None, message
+    error_type = match.group(1)
+    detail = match.group(2).strip()
+    return error_type, detail or message

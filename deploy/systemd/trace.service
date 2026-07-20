@@ -10,5 +10,6 @@ WorkingDirectory=/opt/trace
 Environment=TRACE_PROJECT_DIR=/opt/trace
 EnvironmentFile=-/etc/sysconfig/trace
 ExecStart=/opt/trace/deploy/run-trace.sh
-TimeoutStartSec=infinity
+# CentOS 7 systemd uses 0 to disable the start timeout.
+TimeoutStartSec=0
 Nice=10

@@ -203,7 +203,10 @@ class TrackingRouter:
                     "elapsed_seconds": getattr(exc, "query_elapsed_seconds", None),
                     "retry_delays_seconds": getattr(exc, "query_retry_delays_seconds", []),
                 },
-                error={"type": type(exc).__name__, "message": str(exc)},
+                error={
+                    "type": getattr(exc, "provider_error_type", None) or type(exc).__name__,
+                    "message": getattr(exc, "provider_error_message", None) or str(exc),
+                },
             )
             return result
 

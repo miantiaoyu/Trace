@@ -1,6 +1,6 @@
 import unittest
 
-from trace_api_probe.execution import QueryExecutor, QueryPolicy, QueryTimeoutError
+from trace_api_probe.execution import QueryExecutor, QueryPolicy, QueryTimeoutError, _parse_worker_error
 
 
 class QueryExecutorTests(unittest.TestCase):
@@ -139,6 +139,14 @@ class QueryExecutorTests(unittest.TestCase):
 
         self.assertEqual(sleeps, [3, 5])
         self.assertEqual(metadata["retry_delays_seconds"], [3, 5])
+
+    def test_parses_provider_error_type_from_worker_message(self) -> None:
+        error_type, message = _parse_worker_error(
+            "HmmTrackingError: HMM tracking page did not contain Tracking Result"
+        )
+
+        self.assertEqual(error_type, "HmmTrackingError")
+        self.assertEqual(message, "HMM tracking page did not contain Tracking Result")
 
 
 if __name__ == "__main__":

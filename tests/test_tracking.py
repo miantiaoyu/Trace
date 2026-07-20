@@ -62,6 +62,21 @@ class TrackingRouterTests(unittest.TestCase):
         self.assertEqual(result["status"], "query_failed")
         self.assertEqual(result["error"], {"type": "RuntimeError", "message": "站点超时"})
 
+    def test_query_failure_prefers_provider_error_type(self) -> None:
+        def fail(container, options):
+            error = RuntimeError("HMM tracking page did not contain Tracking Result")
+            error.provider_error_type = "HmmTrackingError"
+            error.provider_error_message = "HMM tracking page did not contain Tracking Result"
+            raise error
+
+        routes = {Carrier.HMM: CarrierRoute("fake_hmm", "测试 HMM 路线", fail)}
+
+        result = TrackingRouter(routes).query(sample("HMM 船司 BCO", "HMMU4706485"), TrackingOptions())
+
+        self.assertEqual(result["status"], "query_failed")
+        self.assertEqual(result["error"]["type"], "HmmTrackingError")
+        self.assertEqual(result["error"]["message"], "HMM tracking page did not contain Tracking Result")
+
     def test_identifies_known_but_unavailable_carrier(self) -> None:
         result = TrackingRouter().query(sample("OOCL 东方海外", "OOLU1234567"))
 
