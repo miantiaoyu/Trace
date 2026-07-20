@@ -6,6 +6,7 @@ import os
 import sys
 
 from trace_api_probe.providers.html_tables import extract_tables
+from trace_api_probe.providers.browser_session import BrowserPageSession
 
 
 TRACKING_PAGE_URL = "https://www.hmm21.com/e-service/general/trackNTrace/TrackNTrace.do"
@@ -24,11 +25,11 @@ def fetch_tracking(
     *,
     headless: bool = False,
     browser_channel: str = "chromium",
+    page: object | None = None,
 ) -> dict[str, object]:
     try:
         from playwright.sync_api import Error as PlaywrightError
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.sync_api import sync_playwright
     except ImportError as exc:
         raise HmmTrackingError("缺少 Playwright。请在运行环境安装依赖并执行 playwright install chromium") from exc
 
@@ -42,28 +43,16 @@ def fetch_tracking(
     if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
         raise HmmTrackingError("HMM 需要有界浏览器。Linux 服务器请使用 xvfb-run -a 启动命令。")
 
-    launch_kwargs: dict[str, object] = {"headless": False}
-    if browser_channel != "chromium":
-        launch_kwargs["channel"] = browser_channel
-
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(**launch_kwargs)
-            page = browser.new_page(viewport={"width": 1440, "height": 900})
-            try:
-                page.goto(TRACKING_PAGE_URL, wait_until="domcontentloaded", timeout=60_000)
-                page.locator(CONTAINER_INPUT_SELECTOR).wait_for(state="visible", timeout=20_000)
-                page.locator(CONTAINER_INPUT_SELECTOR).fill(normalized_container)
-                with page.expect_response(
-                    lambda response: TRACKING_RESPONSE_PATH in response.url
-                    and response.request.method == "POST"
-                    and response.status == 200,
-                    timeout=TRACKING_RESPONSE_TIMEOUT_MS,
-                ) as response_info:
-                    page.locator(SEARCH_BUTTON_SELECTOR).click()
-                raw_html = response_info.value.text()
-            finally:
-                browser.close()
+        if page is None:
+            with BrowserPageSession(
+                headless=False,
+                browser_channel=browser_channel,
+                viewport={"width": 1440, "height": 900},
+            ) as session:
+                raw_html = _fetch_html(session.page, normalized_container)
+        else:
+            raw_html = _fetch_html(page, normalized_container)
     except PlaywrightTimeoutError as exc:
         raise HmmTrackingError("HMM 官网在 120 秒内未返回追踪结果") from exc
     except PlaywrightError as exc:
@@ -72,8 +61,30 @@ def fetch_tracking(
     return _build_result(raw_html, normalized_container)
 
 
+def _fetch_html(page: object, container: str) -> str:
+    page.goto(TRACKING_PAGE_URL, wait_until="domcontentloaded", timeout=60_000)
+    page.locator(CONTAINER_INPUT_SELECTOR).wait_for(state="visible", timeout=20_000)
+    page.locator(CONTAINER_INPUT_SELECTOR).fill(container)
+    with page.expect_response(
+        lambda response: TRACKING_RESPONSE_PATH in response.url
+        and response.request.method == "POST"
+        and response.status == 200,
+        timeout=TRACKING_RESPONSE_TIMEOUT_MS,
+    ) as response_info:
+        page.locator(SEARCH_BUTTON_SELECTOR).click()
+    raw_html = response_info.value.text()
+    if "TRACKING RESULT" not in raw_html.upper():
+        page.wait_for_timeout(1_000)
+        body_text = page.locator("body").inner_text()
+        if "YOUR ACCESS IS BLOCKED BY OUR FIREWALL" in body_text.upper():
+            raise HmmTrackingError("HMM 防火墙已拦截当前公网出口 IP，请联系 HMM 申请解封或白名单")
+    return raw_html
+
+
 def _build_result(raw_html: str, container: str) -> dict[str, object]:
     normalized_html = raw_html.upper()
+    if "YOUR ACCESS IS BLOCKED BY OUR FIREWALL" in normalized_html:
+        raise HmmTrackingError("HMM 防火墙已拦截当前公网出口 IP，请联系 HMM 申请解封或白名单")
     if "TRACKING RESULT" not in normalized_html:
         raise HmmTrackingError("HMM 追踪响应缺少 Tracking Result，页面结构或访问策略可能已变化")
     if container not in normalized_html:

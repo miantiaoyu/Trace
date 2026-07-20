@@ -62,6 +62,8 @@ systemctl start trace.timer
 systemctl list-timers trace.timer --no-pager
 ```
 
+全量任务会按船司分组并复用浏览器会话。默认间隔为普通 HTTP 30 秒、DOM 浏览器 60 秒、完整浏览器 90 秒、万海/HMM 120 秒，因此运行数小时属于正常现象；不要为了提速启动并发任务。任务锁会阻止上一轮未结束时再次运行。
+
 如果启动 timer 时当天凌晨 2 点已经过去，`Persistent=true` 可能立即补跑一次，这是预期行为。
 
 修改 timer 时间后执行：

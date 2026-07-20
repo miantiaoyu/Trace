@@ -14,10 +14,28 @@ class TrackingRouterTests(unittest.TestCase):
     def test_hmm_policy_uses_conservative_retry_backoff(self) -> None:
         policy = ROUTES[Carrier.HMM].policy
 
+        self.assertEqual(policy.min_interval_seconds, 120)
         self.assertEqual(policy.timeout_seconds, 240)
-        self.assertEqual(policy.backoff_base_seconds, 60)
-        self.assertEqual(policy.backoff_max_seconds, 90)
-        self.assertEqual(policy.jitter_seconds, 15)
+        self.assertEqual(policy.backoff_base_seconds, 180)
+        self.assertEqual(policy.backoff_max_seconds, 300)
+        self.assertEqual(policy.jitter_seconds, 60)
+
+    def test_all_available_routes_use_conservative_intervals(self) -> None:
+        expected_minimums = {
+            Carrier.YANG_MING: 30,
+            Carrier.SM_LINE: 30,
+            Carrier.EVERGREEN: 30,
+            Carrier.COSCO: 60,
+            Carrier.ONE: 60,
+            Carrier.MAERSK: 90,
+            Carrier.MSC: 90,
+            Carrier.WAN_HAI: 120,
+            Carrier.HMM: 120,
+        }
+
+        for carrier, minimum in expected_minimums.items():
+            with self.subTest(carrier=carrier):
+                self.assertEqual(ROUTES[carrier].policy.min_interval_seconds, minimum)
 
     def test_rejects_invalid_container_before_calling_carrier_adapter(self) -> None:
         calls = []
@@ -102,6 +120,30 @@ class TrackingRouterTests(unittest.TestCase):
         results = query_samples([sample(container="YMMU0000001"), sample(container="YMMU0000002")], router=TrackingRouter(routes))
 
         self.assertEqual([result["container"] for result in results], ["YMMU0000001", "YMMU0000002"])
+
+    def test_batch_groups_carriers_for_reuse_then_restores_original_order(self) -> None:
+        calls = []
+        closes = []
+
+        class RecordingRouter:
+            def query(self, shipment, options):
+                calls.append(shipment.container_no)
+                return {"container": shipment.container_no, "status": "success"}
+
+            def close_provider(self):
+                closes.append("closed")
+
+        shipments = [
+            sample("YML阳明", "YMMU0000001"),
+            sample("HMM 船司 BCO", "HMMU4706485"),
+            sample("YML阳明", "YMMU0000002"),
+        ]
+
+        results = query_samples(shipments, router=RecordingRouter())
+
+        self.assertEqual(calls, ["YMMU0000001", "YMMU0000002", "HMMU4706485"])
+        self.assertEqual([result["container"] for result in results], [item.container_no for item in shipments])
+        self.assertEqual(closes, ["closed", "closed"])
 
     def test_routes_hmm_mojibake_company_name(self) -> None:
         routes = {

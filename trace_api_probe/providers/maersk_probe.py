@@ -5,6 +5,8 @@ import json
 import sys
 from urllib.parse import quote
 
+from trace_api_probe.providers.browser_session import BrowserPageSession
+
 
 TRACKING_PAGE_URL = "https://www.maersk.com.cn/tracking/{container}"
 
@@ -13,10 +15,9 @@ class MaerskTrackingError(RuntimeError):
     pass
 
 
-def fetch_tracking(container: str) -> dict[str, object]:
+def fetch_tracking(container: str, *, page: object | None = None) -> dict[str, object]:
     try:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.sync_api import sync_playwright
     except ImportError as exc:
         raise MaerskTrackingError("缺少 Playwright。请在 py312 环境安装依赖并执行 playwright install chromium") from exc
 
@@ -26,20 +27,24 @@ def fetch_tracking(container: str) -> dict[str, object]:
     page_url = TRACKING_PAGE_URL.format(container=quote(normalized_container))
 
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page()
-            with page.expect_response(
-                lambda response: "/synergy/tracking/" in response.url and response.status == 200,
-                timeout=60_000,
-            ) as response_info:
-                page.goto(page_url, wait_until="domcontentloaded", timeout=30_000)
-            payload = response_info.value.json()
-            browser.close()
+        if page is None:
+            with BrowserPageSession(headless=True) as session:
+                payload = _fetch_payload(session.page, page_url)
+        else:
+            payload = _fetch_payload(page, page_url)
     except PlaywrightTimeoutError as exc:
         raise MaerskTrackingError("马士基追踪页在 60 秒内未返回轨迹数据") from exc
 
     return _validate_payload(payload, normalized_container)
+
+
+def _fetch_payload(page: object, page_url: str) -> object:
+    with page.expect_response(
+        lambda response: "/synergy/tracking/" in response.url and response.status == 200,
+        timeout=60_000,
+    ) as response_info:
+        page.goto(page_url, wait_until="domcontentloaded", timeout=30_000)
+    return response_info.value.json()
 
 
 def _validate_payload(payload: object, container: str) -> dict[str, object]:

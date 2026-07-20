@@ -42,14 +42,32 @@ def fetch_tracking(
     headless: bool = False,
     browser_channel: str = "chromium",
 ) -> dict[str, object]:
+    session = WanHaiSession(headless=headless, browser_channel=browser_channel)
+    return session.fetch(container)
+
+
+class WanHaiSession:
+    """复用万海预热得到的 Cookie 和 ViewState，避免每个柜号重复启动浏览器。"""
+
+    def __init__(self, *, headless: bool = False, browser_channel: str = "chromium") -> None:
+        self._headless = headless
+        self._browser_channel = browser_channel
+        self._cookie_header: str | None = None
+        self._viewstate: str | None = None
+
+    def fetch(self, container: str) -> dict[str, object]:
+        if self._cookie_header is None or self._viewstate is None:
+            self._cookie_header, self._viewstate = _bootstrap_session(
+                headless=self._headless,
+                browser_channel=self._browser_channel,
+            )
+        return _fetch_with_session(container, self._cookie_header, self._viewstate)
+
+
+def _fetch_with_session(container: str, cookie_header: str, viewstate: str) -> dict[str, object]:
     normalized_container = container.strip().upper()
     if not normalized_container:
         raise WanHaiTrackingError("柜号不能为空")
-
-    cookie_header, viewstate = _bootstrap_session(
-        headless=headless,
-        browser_channel=browser_channel,
-    )
     html, result_url = _submit_tracking_query(
         cookie_header=cookie_header,
         viewstate=viewstate,

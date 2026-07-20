@@ -36,17 +36,17 @@ class CarrierRoute:
     policy: QueryPolicy = DEFAULT_POLICY
 
 
-HTTP_POLICY = QueryPolicy(min_interval_seconds=2, timeout_seconds=45, max_attempts=2)
-DOM_POLICY = QueryPolicy(min_interval_seconds=4, timeout_seconds=60, max_attempts=2)
-BROWSER_POLICY = QueryPolicy(min_interval_seconds=6, timeout_seconds=90, max_attempts=2)
-WAN_HAI_POLICY = QueryPolicy(min_interval_seconds=8, timeout_seconds=120, max_attempts=1)
+HTTP_POLICY = QueryPolicy(min_interval_seconds=30, timeout_seconds=45, max_attempts=2)
+DOM_POLICY = QueryPolicy(min_interval_seconds=60, timeout_seconds=60, max_attempts=2)
+BROWSER_POLICY = QueryPolicy(min_interval_seconds=90, timeout_seconds=90, max_attempts=2)
+WAN_HAI_POLICY = QueryPolicy(min_interval_seconds=120, timeout_seconds=120, max_attempts=1)
 HMM_POLICY = QueryPolicy(
-    min_interval_seconds=12,
+    min_interval_seconds=120,
     timeout_seconds=240,
     max_attempts=2,
-    backoff_base_seconds=60,
-    backoff_max_seconds=90,
-    jitter_seconds=15,
+    backoff_base_seconds=180,
+    backoff_max_seconds=300,
+    jitter_seconds=60,
 )
 
 
@@ -150,6 +150,9 @@ class TrackingRouter:
         self._routes = routes or ROUTES
         self._executor = executor or QueryExecutor(use_subprocess=routes is None)
 
+    def close_provider(self) -> None:
+        self._executor.close_provider()
+
     def query(self, sample: ShipmentSample, options: TrackingOptions | None = None) -> dict[str, object]:
         options = options or TrackingOptions()
         carrier = normalize_carrier(sample.shipping_company)
@@ -237,24 +240,39 @@ def query_samples(
     router: TrackingRouter | None = None,
 ) -> list[dict[str, object]]:
     active_router = router or TrackingRouter()
-    results = []
-    for sample in samples:
+    grouped_indices: dict[str, list[int]] = {}
+    for index, sample in enumerate(samples):
+        carrier = normalize_carrier(sample.shipping_company)
+        key = carrier.value if carrier else f"UNKNOWN:{sample.shipping_company}"
+        grouped_indices.setdefault(key, []).append(index)
+
+    results: list[dict[str, object] | None] = [None] * len(samples)
+    for indices in grouped_indices.values():
         try:
-            results.append(active_router.query(sample, options))
-        except Exception as exc:
-            carrier = normalize_carrier(sample.shipping_company)
-            result = _sample_metadata(sample, carrier)
-            result.update(
-                status="internal_error",
-                route="unknown",
-                error={
-                    "stage": "routing",
-                    "type": type(exc).__name__,
-                    "message": str(exc),
-                },
-            )
-            results.append(result)
-    return results
+            for index in indices:
+                sample = samples[index]
+                try:
+                    results[index] = active_router.query(sample, options)
+                except Exception as exc:
+                    carrier = normalize_carrier(sample.shipping_company)
+                    result = _sample_metadata(sample, carrier)
+                    result.update(
+                        status="internal_error",
+                        route="unknown",
+                        error={
+                            "stage": "routing",
+                            "type": type(exc).__name__,
+                            "message": str(exc),
+                        },
+                    )
+                    results[index] = result
+        finally:
+            close_provider = getattr(active_router, "close_provider", None)
+            if callable(close_provider):
+                close_provider()
+    if any(result is None for result in results):  # pragma: no cover - defensive batch invariant
+        raise AssertionError("批量查询结果未与全部输入样本对应")
+    return [result for result in results if result is not None]
 
 
 def _sample_metadata(sample: ShipmentSample, carrier: Carrier | None) -> dict[str, object]:

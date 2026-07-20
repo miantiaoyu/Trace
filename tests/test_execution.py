@@ -1,6 +1,13 @@
 import unittest
+from io import StringIO
 
-from trace_api_probe.execution import QueryExecutor, QueryPolicy, QueryTimeoutError, _parse_worker_error
+from trace_api_probe.execution import (
+    ProviderWorkerClient,
+    QueryExecutor,
+    QueryPolicy,
+    QueryTimeoutError,
+    _parse_worker_error,
+)
 
 
 class QueryExecutorTests(unittest.TestCase):
@@ -147,6 +154,54 @@ class QueryExecutorTests(unittest.TestCase):
 
         self.assertEqual(error_type, "HmmTrackingError")
         self.assertEqual(message, "HMM tracking page did not contain Tracking Result")
+
+
+class ProviderWorkerClientTests(unittest.TestCase):
+    def test_reuses_worker_for_same_carrier(self) -> None:
+        processes = []
+
+        class Input:
+            def write(self, value):
+                return len(value)
+
+            def flush(self):
+                return None
+
+            def close(self):
+                return None
+
+        class Process:
+            def __init__(self):
+                self.stdin = Input()
+                self.stdout = StringIO(
+                    '{"ok": true, "result": {"container": "HMMU4706485"}}\n'
+                    '{"ok": true, "result": {"container": "HMMU4706486"}}\n'
+                )
+                self.stderr = StringIO()
+                self.returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                self.returncode = 0
+                return 0
+
+        def popen(*args, **kwargs):
+            process = Process()
+            processes.append(process)
+            return process
+
+        client = ProviderWorkerClient(popen_factory=popen)
+        options = type("Options", (), {"headless": False, "browser_channel": "chromium"})()
+
+        first = client.run("HMM", lambda *_: None, "HMMU4706485", options, 1)
+        second = client.run("HMM", lambda *_: None, "HMMU4706486", options, 1)
+        client.close()
+
+        self.assertEqual(len(processes), 1)
+        self.assertEqual(first["container"], "HMMU4706485")
+        self.assertEqual(second["container"], "HMMU4706486")
 
 
 if __name__ == "__main__":

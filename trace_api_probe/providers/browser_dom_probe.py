@@ -7,6 +7,8 @@ import sys
 from dataclasses import dataclass
 from urllib.parse import quote
 
+from trace_api_probe.providers.browser_session import BrowserPageSession
+
 
 @dataclass(frozen=True)
 class DomProviderSpec:
@@ -30,10 +32,9 @@ class DomTrackingError(RuntimeError):
     pass
 
 
-def fetch_tracking(carrier: str, container: str) -> dict[str, object]:
+def fetch_tracking(carrier: str, container: str, *, page: object | None = None) -> dict[str, object]:
     try:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.sync_api import sync_playwright
     except ImportError as exc:
         raise DomTrackingError("缺少 Playwright。请在 py312 环境安装 playwright 并执行 playwright install chromium") from exc
 
@@ -45,28 +46,11 @@ def fetch_tracking(carrier: str, container: str) -> dict[str, object]:
     url = spec.url_template.format(container=quote(normalized_container))
 
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            page = browser.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            rows_locator = page.locator("tr")
-            page.wait_for_function("() => document.querySelectorAll('tr').length >= 2", timeout=20_000)
-            body = page.locator("body").inner_text()
-            rows = [split_row(text) for text in rows_locator.all_inner_texts()]
-            row_metadata = rows_locator.evaluate_all(
-                """rows => rows.map(row => {
-                    const fills = Array.from(row.querySelectorAll('svg rect[fill]'))
-                        .map(rect => (rect.getAttribute('fill') || '').toUpperCase());
-                    return {
-                        time_type: fills.includes('#00506D')
-                            ? 'ACTUAL'
-                            : fills.includes('#BD0F72')
-                                ? 'EXPECTED'
-                                : null
-                    };
-                })"""
-            )
-            browser.close()
+        if page is None:
+            with BrowserPageSession(headless=True) as session:
+                body, rows, row_metadata = _fetch_page(session.page, url)
+        else:
+            body, rows, row_metadata = _fetch_page(page, url)
     except PlaywrightTimeoutError as exc:
         raise DomTrackingError(f"{normalized_carrier} 查询页在 20 秒内未出现结果表") from exc
 
@@ -83,6 +67,28 @@ def fetch_tracking(carrier: str, container: str) -> dict[str, object]:
         "rows": rows,
         "row_metadata": row_metadata,
     }
+
+
+def _fetch_page(page: object, url: str) -> tuple[str, list[list[str]], list[dict[str, object]]]:
+    page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+    rows_locator = page.locator("tr")
+    page.wait_for_function("() => document.querySelectorAll('tr').length >= 2", timeout=20_000)
+    body = page.locator("body").inner_text()
+    rows = [split_row(text) for text in rows_locator.all_inner_texts()]
+    row_metadata = rows_locator.evaluate_all(
+        """rows => rows.map(row => {
+            const fills = Array.from(row.querySelectorAll('svg rect[fill]'))
+                .map(rect => (rect.getAttribute('fill') || '').toUpperCase());
+            return {
+                time_type: fills.includes('#00506D')
+                    ? 'ACTUAL'
+                    : fills.includes('#BD0F72')
+                        ? 'EXPECTED'
+                        : null
+            };
+        })"""
+    )
+    return body, rows, row_metadata
 
 
 def split_row(text: str) -> list[str]:

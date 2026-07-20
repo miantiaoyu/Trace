@@ -4,6 +4,8 @@ import argparse
 import json
 import sys
 
+from trace_api_probe.providers.browser_session import BrowserPageSession
+
 
 TRACKING_PAGE_URL = "https://www.msc.com/en/track-a-shipment?agencyPath=hkg"
 COOKIE_ACCEPT_SELECTOR = "#onetrust-accept-btn-handler"
@@ -21,10 +23,10 @@ def fetch_tracking(
     *,
     headless: bool = False,
     browser_channel: str = "chromium",
+    page: object | None = None,
 ) -> dict[str, object]:
     try:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.sync_api import sync_playwright
     except ImportError as exc:
         raise MscTrackingError("缺少 Playwright。请在 py312 环境安装依赖并执行 playwright install chromium") from exc
 
@@ -32,34 +34,32 @@ def fetch_tracking(
     if not normalized_container:
         raise MscTrackingError("柜号不能为空")
 
-    launch_kwargs: dict[str, object] = {"headless": headless}
-    if browser_channel != "chromium":
-        launch_kwargs["channel"] = browser_channel
-
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(**launch_kwargs)
-            page = browser.new_page()
-            try:
-                page.goto(TRACKING_PAGE_URL, wait_until="domcontentloaded", timeout=60_000)
-                _accept_cookies(page)
-                page.locator(TRACKING_INPUT_SELECTOR).wait_for(state="visible", timeout=20_000)
-                page.locator(TRACKING_INPUT_SELECTOR).fill(normalized_container)
-                page.locator(SEARCH_BUTTON_SELECTOR).wait_for(state="visible", timeout=10_000)
-                with page.expect_response(
-                    lambda response: TRACKING_RESPONSE_PATH in response.url
-                    and response.request.method == "POST"
-                    and response.status == 200,
-                    timeout=60_000,
-                ) as response_info:
-                    page.locator(SEARCH_BUTTON_SELECTOR).click()
-                payload = response_info.value.json()
-            finally:
-                browser.close()
+        if page is None:
+            with BrowserPageSession(headless=headless, browser_channel=browser_channel) as session:
+                payload = _fetch_payload(session.page, normalized_container)
+        else:
+            payload = _fetch_payload(page, normalized_container)
     except PlaywrightTimeoutError as exc:
         raise MscTrackingError("MSC 官网在 60 秒内未返回追踪结果") from exc
 
     return _validate_payload(payload, normalized_container)
+
+
+def _fetch_payload(page: object, container: str) -> object:
+    page.goto(TRACKING_PAGE_URL, wait_until="domcontentloaded", timeout=60_000)
+    _accept_cookies(page)
+    page.locator(TRACKING_INPUT_SELECTOR).wait_for(state="visible", timeout=20_000)
+    page.locator(TRACKING_INPUT_SELECTOR).fill(container)
+    page.locator(SEARCH_BUTTON_SELECTOR).wait_for(state="visible", timeout=10_000)
+    with page.expect_response(
+        lambda response: TRACKING_RESPONSE_PATH in response.url
+        and response.request.method == "POST"
+        and response.status == 200,
+        timeout=60_000,
+    ) as response_info:
+        page.locator(SEARCH_BUTTON_SELECTOR).click()
+    return response_info.value.json()
 
 
 def _accept_cookies(page: object) -> None:

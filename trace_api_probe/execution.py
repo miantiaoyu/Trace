@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import queue
 import random
 import re
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -56,11 +58,16 @@ class QueryExecutor:
         sleep: Callable[[float], None] = time.sleep,
         random_value: Callable[[], float] = random.random,
     ) -> None:
-        self._runner = runner or (_run_with_subprocess_timeout if use_subprocess else _run_direct)
+        self._worker_client = ProviderWorkerClient() if runner is None and use_subprocess else None
+        self._runner = runner or (self._worker_client.run if self._worker_client else _run_direct)
         self._clock = clock
         self._sleep = sleep
         self._random_value = random_value
         self._last_started_at: dict[str, float] = {}
+
+    def close_provider(self) -> None:
+        if self._worker_client is not None:
+            self._worker_client.close()
 
     def execute(
         self,
@@ -125,48 +132,137 @@ class QueryExecutor:
         return round(delay, 3)
 
 
-def _run_with_subprocess_timeout(
-    carrier: str,
-    adapter: Callable[[str, object], object],
-    container: str,
-    options: object,
-    timeout_seconds: float,
-) -> object:
-    """由独立 Python 子进程执行 Provider；超时会终止浏览器或网络请求。"""
-    del adapter
-    command = [
-        sys.executable,
-        "-m",
-        "trace_api_probe.worker",
-        "--carrier",
-        carrier,
-        "--container",
-        container,
-        "--browser-channel",
-        str(getattr(options, "browser_channel", "chromium")),
-    ]
-    if getattr(options, "headless", False):
-        command.append("--headless")
-    try:
-        completed = subprocess.run(
+class ProviderWorkerClient:
+    """同一船司复用一个 Provider 子进程，同时保留单柜硬超时。"""
+
+    def __init__(
+        self,
+        *,
+        popen_factory: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
+    ) -> None:
+        self._popen_factory = popen_factory
+        self._process: subprocess.Popen[str] | None = None
+        self._worker_key: tuple[str, bool, str] | None = None
+
+    def run(
+        self,
+        carrier: str,
+        adapter: Callable[[str, object], object],
+        container: str,
+        options: object,
+        timeout_seconds: float,
+    ) -> object:
+        del adapter
+        key = (
+            carrier,
+            bool(getattr(options, "headless", False)),
+            str(getattr(options, "browser_channel", "chromium")),
+        )
+        self._ensure_worker(key)
+        process = self._process
+        if process is None or process.stdin is None or process.stdout is None:
+            raise RuntimeError("Provider 子进程未正确启动")
+
+        try:
+            process.stdin.write(json.dumps({"container": container}, ensure_ascii=False) + "\n")
+            process.stdin.flush()
+        except (BrokenPipeError, OSError) as exc:
+            details = self._worker_details()
+            self.close()
+            raise RuntimeError(f"Provider 子进程连接已断开: {details}") from exc
+
+        response_queue: queue.Queue[str | BaseException] = queue.Queue(maxsize=1)
+
+        def read_response() -> None:
+            try:
+                response_queue.put(process.stdout.readline())
+            except BaseException as exc:  # pragma: no cover - defensive pipe handling
+                response_queue.put(exc)
+
+        threading.Thread(target=read_response, daemon=True).start()
+        try:
+            response = response_queue.get(timeout=timeout_seconds)
+        except queue.Empty as exc:
+            self.close()
+            raise QueryTimeoutError(f"查询超过 {timeout_seconds:g} 秒，已终止本次 Provider 进程") from exc
+
+        if isinstance(response, BaseException):
+            self.close()
+            raise RuntimeError(f"读取 Provider 子进程响应失败: {response}") from response
+        if not response:
+            details = self._worker_details()
+            self.close()
+            raise RuntimeError(f"Provider 子进程提前退出: {details}")
+        try:
+            payload = json.loads(response)
+        except json.JSONDecodeError as exc:
+            self.close()
+            raise RuntimeError(f"Provider 子进程未返回有效 JSON: {response[:300]}") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("Provider 子进程响应不是 JSON 对象")
+        if payload.get("ok") is True:
+            return payload.get("result")
+        error_type = str(payload.get("error_type") or "") or None
+        message = str(payload.get("message") or "Provider 查询失败")
+        raise ProviderProcessError(message, provider_error_type=error_type)
+
+    def close(self) -> None:
+        process = self._process
+        self._process = None
+        self._worker_key = None
+        if process is None:
+            return
+        if process.stdin is not None:
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+
+    def _ensure_worker(self, key: tuple[str, bool, str]) -> None:
+        if self._process is not None and self._process.poll() is None and self._worker_key == key:
+            return
+        self.close()
+        carrier, headless, browser_channel = key
+        command = [
+            sys.executable,
+            "-m",
+            "trace_api_probe.worker",
+            "--serve",
+            "--carrier",
+            carrier,
+            "--browser-channel",
+            browser_channel,
+        ]
+        if headless:
+            command.append("--headless")
+        self._process = self._popen_factory(
             command,
-            capture_output=True,
-            check=False,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout_seconds,
             encoding="utf-8",
             errors="replace",
+            bufsize=1,
         )
-    except subprocess.TimeoutExpired as exc:
-        raise QueryTimeoutError(f"查询超过 {timeout_seconds:g} 秒，已终止本次 Provider 进程") from exc
-    if completed.returncode != 0:
-        raw_message = completed.stderr.strip() or completed.stdout.strip() or f"退出码: {completed.returncode}"
-        error_type, message = _parse_worker_error(raw_message)
-        raise ProviderProcessError(message, provider_error_type=error_type)
-    try:
-        return json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("Provider 子进程未返回有效 JSON") from exc
+        self._worker_key = key
+
+    def _worker_details(self) -> str:
+        process = self._process
+        if process is None:
+            return "进程不存在"
+        if process.poll() is None or process.stderr is None:
+            return "进程仍在运行但未返回结果"
+        return process.stderr.read().strip() or f"退出码 {process.returncode}"
 
 
 def _run_direct(
